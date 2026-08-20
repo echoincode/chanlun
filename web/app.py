@@ -43,13 +43,14 @@ inject_styles()
 
 
 @st.cache_data(ttl=settings.CACHE_TTL)
-def cached_analysis(stock_code, start_date, end_date, data_type, frequency):
+def cached_analysis(stock_code, start_date, end_date, data_type, frequency, data_source):
     """缓存的分析函数（缓存保留在 web 侧，不迁移到 runner）。
 
-    v4：数据源唯一 tushare，直接走 runner.fetch_data + runner.analyze。
+    v5：数据源可切换 tushare / baostock，走 runner.fetch_data + runner.analyze。
     """
     df = fetch_data(
-        stock_code, start_date, end_date, data_type=data_type, frequency=frequency
+        stock_code, start_date, end_date, data_type=data_type,
+        frequency=frequency, data_source=data_source,
     )
     return analyze(df)
 
@@ -61,13 +62,14 @@ def main():
         '<div class="chanlun-title">📊 缠论K线分析工具</div>', unsafe_allow_html=True
     )
     st.markdown(
-        '<div class="chanlun-subtitle">基于 Tushare 数据源 · 分型 + 笔识别（仅供学习研究）</div>',
+        '<div class="chanlun-subtitle">基于多数据源（Tushare / Baostock）· 分型 + 笔识别（仅供学习研究）</div>',
         unsafe_allow_html=True,
     )
     # 固定免责提示栏
     st.markdown(
         '<div class="chanlun-disclaimer">⚠️ 免责声明：本工具仅为缠论算法学习与研究的工程化尝试，'
-        "不构成任何投资建议。投资有风险，入市需谨慎。数据源 Tushare 支持 A股/ETF/指数。"
+        "不构成任何投资建议。投资有风险，入市需谨慎。数据源支持 A股/ETF/指数（Tushare、Baostock）"
+        "及港股（Baostock）。"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -76,13 +78,28 @@ def main():
     with st.sidebar:
         st.markdown("### ⚙️ 参数配置")
 
+        # 数据源组
+        # 前端暂时注释 Tushare 选项，仅保留 Baostock（后端 Tushare 逻辑仍在 src/data/tushare_fetcher.py）。
+        # with st.container(border=True):
+        #     st.markdown("**🔌 数据源**")
+        #     data_source = st.selectbox(
+        #         "数据源",
+        #         options=list(settings.DATA_SOURCES.keys()),
+        #         index=list(settings.DATA_SOURCES.keys()).index(
+        #             settings.DEFAULT_PARAMS["data_source"]
+        #         ),
+        #         format_func=lambda x: settings.DATA_SOURCES[x]["name"],
+        #         help="Tushare 需配置 TUSHARE_TOKEN；Baostock 免费免 token，支持港股与分钟线",
+        #     )
+        data_source = "baostock"  # 临时固定为 Baostock，待 Tushare pro_bar 权限就绪后可恢复下拉框
+
         # 标的组
         with st.container(border=True):
             st.markdown("**📌 标的**")
             stock_code_input = st.text_input(
                 "股票代码",
                 value=settings.DEFAULT_CODE,
-                help="支持格式: 600000, 600000.SH, 510300, 000300 等",
+                help="支持格式: 600000, 600000.SH, 510300, 000300；Baostock 亦支持 sh.600588 / 港股",
             )
 
         # 周期组
@@ -139,14 +156,14 @@ def main():
             st.error("❌ 开始日期不能晚于结束日期!")
             return
 
-        # 【v4】港股提示：tushare 需单独权限，主动提示并中断，不静默失败
-        if get_market_type(stock_code) == "hk":
-            st.warning("❌ Tushare 数据源暂不支持港股，请使用 A股/ETF/指数代码!")
+        # 港股提示：仅 tushare 源不支持港股，主动提示并中断；baostock 支持港股
+        if get_market_type(stock_code) == "hk" and data_source == "tushare":
+            st.warning("❌ Tushare 数据源暂不支持港股，请切换数据源为 Baostock，或使用 A股/ETF/指数代码!")
             return
 
-        # 【v4】分钟线提示：tushare 当前仅支持日线，主动提示并中断
-        if data_type != "daily":
-            st.warning("⚠️ Tushare 数据源当前仅支持日线，分钟线暂未开通，请选择「日线」!")
+        # 分钟线提示：仅 tushare 源仅支持日线，主动提示并中断；baostock 支持分钟线
+        if data_type != "daily" and data_source == "tushare":
+            st.warning("⚠️ Tushare 数据源当前仅支持日线，分钟线请切换数据源为 Baostock 或选择「日线」!")
             return
 
         # 显示加载状态
@@ -162,6 +179,7 @@ def main():
                     end_date.strftime("%Y-%m-%d"),
                     data_type,
                     frequency,
+                    data_source,
                 )
 
                 # 结果摘要

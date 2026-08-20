@@ -42,16 +42,16 @@ PAGE_CONFIG = {
 # v3：data_source 由 "mootdx" 改为 "tushare"
 # ---------------------------------------------------------------------------
 DEFAULT_PARAMS = {
-    "stock_code": "600000",                       # app/main.py 第 234 行硬编码
-    "start_date": datetime(2024, 1, 1).date(),     # app/main.py 第 243 行硬编码
-    "data_source": "tushare",                      # v3：原 "mootdx" → "tushare"
+    "stock_code": "600588",                       # 用户默认标的
+    "start_date": datetime(2025, 1, 1).date(),     # 用户默认开始时间
+    "data_source": "baostock",                     # 用户默认数据源
     "data_type": "daily",
     "frequency": "30",
 }
 
 # app/main.py 硬编码补充常量
-DEFAULT_CODE = "600000"                            # app/main.py 第 234 行
-DEFAULT_START_DATE = datetime(2024, 1, 1).date()  # app/main.py 第 243 行
+DEFAULT_CODE = "600588"                            # 用户默认标的
+DEFAULT_START_DATE = datetime(2025, 1, 1).date()  # 用户默认开始时间
 DEFAULT_FREQUENCY = "30"                           # app/main.py 第 269 行
 DEFAULT_MINUTE_FREQ_INDEX = 2                      # app/main.py 第 274 行 selectbox index=2 → "30"
 
@@ -61,8 +61,13 @@ DEFAULT_MINUTE_FREQ_INDEX = 2                      # app/main.py 第 274 行 sel
 DATA_SOURCES = {
     "tushare": {
         "name": "Tushare",
-        "description": "支持A股/ETF/指数，经私有代理取数，数据稳定",
+        "description": "支持A股/ETF/指数，经私有代理取数，数据稳定（需 TUSHARE_TOKEN）",
         "supported_markets": ["A股", "ETF", "指数"],
+    },
+    "baostock": {
+        "name": "Baostock",
+        "description": "支持A股/ETF/指数/港股，免费免 token，支持分钟线",
+        "supported_markets": ["A股", "ETF", "指数", "港股"],
     },
 }
 

@@ -32,34 +32,73 @@ def fetch_data(
     market_type: str | None = None,
     data_type: str = "daily",
     frequency: str = "30",
+    data_source: str = "tushare",
 ) -> pd.DataFrame:
-    """获取 K 线数据：按市场类型分派到对应 Tushare 接口。
+    """获取 K 线数据：按数据源分派（tushare / baostock）。
 
     入参与原 web 侧 analyze_stock_with_mootdx/baostock 一致：
     (stock_code, start_date, end_date, data_type, frequency)。
 
     Args:
-        code: 标准化代码（Tushare 格式 600000.SH / 510300.SH / 000300.SH）
+        code: 标准化代码（Tushare 格式 600000.SH / 510300.SH / 000300.SH，
+            或 Baostock 格式 sh.600588 / sz.000001）
         start_date: 起始日期 YYYY-MM-DD
         end_date: 结束日期 YYYY-MM-DD
         market_type: stock/etf/index/hk；缺省时由 get_market_type(code) 自动识别
-        data_type: 仅支持 daily（v4 Tushare 数据源当前只通日线）
-        frequency: 分钟周期，daily 时忽略（保留仅为入参兼容）
+            （仅 Tushare 源生效，Baostock 不区分市场类型）
+        data_type: daily / minute
+        frequency: 日线 'd'，分钟线 5/15/30/60（仅 Baostock 源走分钟线；
+            Tushare 源当前仅支持 daily）
+        data_source: 'tushare'（默认，需 TUSHARE_TOKEN）或 'baostock'（免费免 token）
 
     Returns:
         标准 8 列 DataFrame：datetime,open,high,low,close,volume,amount,code
     """
+    if data_source == "baostock":
+        return _fetch_from_baostock(code, start_date, end_date, data_type, frequency)
+
+    # 默认 tushare 源
     if data_type != "daily":
         raise ValueError(
-            f"Tushare 数据源当前仅支持 daily（收到 data_type={data_type!r}），分钟线后续扩展"
+            f"Tushare 数据源当前仅支持 daily（收到 data_type={data_type!r}），分钟线请改用 Baostock 源"
         )
     if market_type is None:
         market_type = get_market_type(code)
     if market_type == "hk":
-        raise ValueError("Tushare 不支持港股（需单独权限），请使用 A股/ETF/指数")
+        raise ValueError("Tushare 不支持港股（需单独权限），请使用 A股/ETF/指数或 Baostock 源")
 
     client = TushareClient()
+    if not client.is_available():
+        print("✗ 错误：未配置 TUSHARE_TOKEN，无法获取行情数据")
+        print("  请在 .env 中设置 TUSHARE_TOKEN=你的token，或切换数据源为 Baostock")
+        sys.exit(2)
     return client.fetch_daily_data(code, start_date, end_date, market_type)
+
+
+def _fetch_from_baostock(
+    code: str,
+    start_date: str,
+    end_date: str,
+    data_type: str,
+    frequency: str,
+) -> pd.DataFrame:
+    """从 Baostock 数据源取数（免费、免 token，支持 A股/ETF/指数日线与分钟线）。"""
+    from src.data.baostock_fetcher import BaostockClient
+
+    bs_freq = "d" if data_type == "daily" else str(frequency)
+    try:
+        client = BaostockClient()
+        return client.fetch_daily_data(
+            code,
+            start_date,
+            end_date,
+            frequency=bs_freq,
+            adjustflag="2",
+        )
+    except ImportError:
+        raise RuntimeError(
+            "未安装 baostock，请执行: pip install baostock"
+        )
 
 
 def analyze(data: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -96,13 +135,16 @@ def _extract_fractals(processor: ChanlunProcessor) -> list[dict]:
     if processor.fractals_data is not None:
         is_f = processor.fractals_data[processor.fractals_data["is_fractal"]]
         for idx, row in is_f.iterrows():
+            # 兼容 Tushare(20250307) 与 Baostock(2025-03-07) 两种日期格式：
+            # 去除所有非数字字符后转 int，归一为纯日期整数字符串
+            dt_raw = str(row["datetime"]).replace("-", "").replace("/", "")
             fractals.append(
                 {
                     "index": int(idx),
                     "type": str(row["fractal_type"]),
                     "high": float(row["high"]),
                     "low": float(row["low"]),
-                    "datetime": str(int(row["datetime"])),
+                    "datetime": str(int(dt_raw)),
                 }
             )
     return fractals

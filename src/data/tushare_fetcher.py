@@ -51,6 +51,11 @@ class TushareClient(BaseFetcher):
     # 关键：更换请求地址（不使用官方 api.tushare.pro，改用私有代理地址）
     DEFAULT_API_URL = TUSHARE_API_URL
 
+    @staticmethod
+    def is_available() -> bool:
+        """无需实例化即可检查 token 是否就绪（供 runner 提前拦截）。"""
+        return bool(TUSHARE_TOKEN)
+
     def __init__(
         self,
         token: str | None = None,
@@ -171,8 +176,12 @@ class TushareClient(BaseFetcher):
         end_date: str = "20240110",
         freq: str = "D",
         asset: str = "E",
+        adj: str | None = None,
     ) -> list[dict[str, Any]]:
-        """通用行情接口（日/周/月/分钟）。"""
+        """通用行情接口（日/周/月/分钟），支持复权。
+
+        adj: None 未复权 / "qfq" 前复权 / "hfq" 后复权（仅 asset='E' 股票支持）。
+        """
         return self.query(
             "pro_bar",
             ts_code=ts_code,
@@ -180,6 +189,7 @@ class TushareClient(BaseFetcher):
             end_date=end_date,
             freq=freq,
             asset=asset,
+            adj=adj,
         )
 
     def index_daily(
@@ -220,14 +230,17 @@ class TushareClient(BaseFetcher):
         start_date: str,
         end_date: str,
         market_type: str = "stock",
+        adj: str = "qfq",
     ) -> pd.DataFrame:
         """BaseFetcher 统一接口：获取日线数据，返回标准 8 列 DataFrame。
 
-        根据 market_type 分派到 Tushare 接口：
-          stock → daily
-          etf   → fund_daily
-          index → index_daily
-          hk    → 不支持（tushare 港股需单独权限）
+        统一走 pro_bar 通用行情接口，并默认前复权（adj="qfq"），
+        与 Baostock 默认前复权（adjustflag="2"）口径对齐，消除展示不一致。
+
+        注意：
+          - adj=None 未复权 / "qfq" 前复权 / "hfq" 后复权（仅股票支持）
+          - 指数/基金（asset 非 'E'）pro_bar 不支持 adj，自动降级为 None
+          - hk：tushare 港股需单独权限，直接报错
 
         列映射（吸收自 gen_golden_samples.py 的 _tushare_to_standard）：
           trade_date → datetime (YYYYMMDD → YYYY-MM-DD)
@@ -239,16 +252,37 @@ class TushareClient(BaseFetcher):
             raise ValueError(
                 "Tushare 不支持港股（需单独权限），请使用 A股/ETF/指数"
             )
-        api = _MARKET_API_MAP.get(market_type, "daily")
+        # asset 映射：stock→E, etf→FD, index→I
+        asset = {"stock": "E", "etf": "FD", "index": "I"}.get(market_type, "E")
+        # qfq/hfq 仅股票支持，指数/基金强制不复权
+        if asset != "E":
+            adj = None
         start = start_date.replace("-", "")
         end = end_date.replace("-", "")
-        rows = self.query(
-            api,
-            fields="ts_code,trade_date,open,high,low,close,vol,amount",
-            ts_code=code,
-            start_date=start,
-            end_date=end,
-        )
+        try:
+            rows = self.pro_bar(
+                ts_code=code,
+                start_date=start,
+                end_date=end,
+                freq="D",
+                asset=asset,
+                adj=adj,
+            )
+        except RuntimeError as e:
+            # pro_bar 需要积分权限（40101 接口未授权）。权限不足时优雅降级到
+            # 原 daily/fund_daily/index_daily（不复权），保证功能不中断；
+            # 此时无法与 Baostock 前复权对齐，仅在有 pro_bar 权限时生效。
+            if "40101" in str(e):
+                api = _MARKET_API_MAP.get(market_type, "daily")
+                rows = self.query(
+                    api,
+                    fields="ts_code,trade_date,open,high,low,close,vol,amount",
+                    ts_code=code,
+                    start_date=start,
+                    end_date=end,
+                )
+            else:
+                raise
         return self._to_standard_dataframe(rows, code)
 
     @staticmethod
