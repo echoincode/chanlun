@@ -1,0 +1,203 @@
+"""web/app.py - 缠论K线分析工具 Web 界面（Phase 5 · Step 5-2，改造后新入口）
+
+迁移自 project_backup/app/main.py，改造点（对齐《分步执行清单》Step 5-2）：
+  1. import 路径：引用 src/cli/runner、src/config/settings、src/utils/logger、
+     src/utils/common、src/visual/plotly_viz、web/styles；
+  2. 【v4】数据源统一为 tushare：移除原 data_source selectbox（用户决策），
+     分析走 runner.fetch_data + runner.analyze（tushare 唯一数据源）；
+  3. 布局美化：标题+简介+固定免责提示栏；参数控件分组（标的组/周期组）；
+     按钮整行宽度；结果区 st.success/warning/error；图表自适应宽度；
+  4. 完整保留原 session_state 自动触发逻辑（切换到上次分析过的股票时自动重跑），
+     不改为"必须点击"；
+  5. @st.cache_data 缓存保留在 web 侧，不迁移到 runner；
+  6. 原控件/输出项保留（除 data_source 移除）：股票代码/日期/数据类型/分钟周期；
+     【v4】选分钟线时 st.warning 提示"Tushare 当前仅支持日线"并中断；
+  7. 【v4】港股输入 st.warning 提示并中断（tushare 需单独权限，不静默失败）；
+  8. 反馈性 print 替换为 logger（fetcher/算法内 print 不动）。
+"""
+from __future__ import annotations
+
+import os
+import sys
+from datetime import datetime
+
+# 添加项目根目录到路径以导入 src / web 模块（streamlit run 下脚本目录非仓库根）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import streamlit as st
+
+from src.cli.runner import fetch_data, analyze
+from src.config import settings
+from src.utils.common import get_default_end_date, get_market_type, normalize_stock_code
+from src.utils.logger import get_logger
+from src.visual.plotly_viz import plotly_chanlun_visualization
+from web.styles import inject_styles
+
+logger = get_logger(__name__)
+
+# 页面配置
+st.set_page_config(**settings.PAGE_CONFIG)
+
+# 注入全局样式
+inject_styles()
+
+
+@st.cache_data(ttl=settings.CACHE_TTL)
+def cached_analysis(stock_code, start_date, end_date, data_type, frequency):
+    """缓存的分析函数（缓存保留在 web 侧，不迁移到 runner）。
+
+    v4：数据源唯一 tushare，直接走 runner.fetch_data + runner.analyze。
+    """
+    df = fetch_data(
+        stock_code, start_date, end_date, data_type=data_type, frequency=frequency
+    )
+    return analyze(df)
+
+
+def main():
+    """主函数"""
+    # 标题 + 简介
+    st.markdown(
+        '<div class="chanlun-title">📊 缠论K线分析工具</div>', unsafe_allow_html=True
+    )
+    st.markdown(
+        '<div class="chanlun-subtitle">基于 Tushare 数据源 · 分型 + 笔识别（仅供学习研究）</div>',
+        unsafe_allow_html=True,
+    )
+    # 固定免责提示栏
+    st.markdown(
+        '<div class="chanlun-disclaimer">⚠️ 免责声明：本工具仅为缠论算法学习与研究的工程化尝试，'
+        "不构成任何投资建议。投资有风险，入市需谨慎。数据源 Tushare 支持 A股/ETF/指数。"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # 侧边栏参数配置
+    with st.sidebar:
+        st.markdown("### ⚙️ 参数配置")
+
+        # 标的组
+        with st.container(border=True):
+            st.markdown("**📌 标的**")
+            stock_code_input = st.text_input(
+                "股票代码",
+                value=settings.DEFAULT_CODE,
+                help="支持格式: 600000, 600000.SH, 510300, 000300 等",
+            )
+
+        # 周期组
+        with st.container(border=True):
+            st.markdown("**📅 周期**")
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input(
+                    "开始日期",
+                    value=settings.DEFAULT_START_DATE,
+                    help="数据获取的起始日期",
+                )
+            with col2:
+                end_date = st.date_input(
+                    "结束日期",
+                    value=get_default_end_date(),
+                    help="数据获取的结束日期",
+                )
+
+            # 数据类型（v4：保留控件，选分钟线时提示中断）
+            data_type = st.radio(
+                "数据类型",
+                ["daily", "minute"],
+                format_func=lambda x: "日线" if x == "daily" else "分钟线",
+                horizontal=True,
+            )
+            frequency = settings.DEFAULT_FREQUENCY
+            if data_type == "minute":
+                frequency = st.selectbox(
+                    "分钟周期",
+                    settings.MINUTE_FREQUENCIES,
+                    index=settings.DEFAULT_MINUTE_FREQ_INDEX,
+                    help="选择分钟K线的周期",
+                )
+
+        # 分析按钮
+        analyze_button = st.button("🚀 开始分析", use_container_width=True)
+
+    # 主内容区
+    # ⚠️ 完整保留原 session_state 自动触发逻辑（原 main.py 第 282 行）：
+    #    若本次输入代码与上次分析过的代码相同，即使未点按钮也会自动重跑。
+    if analyze_button or (
+        "last_analyzed" in st.session_state
+        and st.session_state.last_analyzed == stock_code_input
+    ):
+        if analyze_button:
+            st.session_state.last_analyzed = stock_code_input
+
+        # 标准化股票代码
+        stock_code = normalize_stock_code(stock_code_input)
+
+        # 参数校验
+        if start_date > end_date:
+            st.error("❌ 开始日期不能晚于结束日期!")
+            return
+
+        # 【v4】港股提示：tushare 需单独权限，主动提示并中断，不静默失败
+        if get_market_type(stock_code) == "hk":
+            st.warning("❌ Tushare 数据源暂不支持港股，请使用 A股/ETF/指数代码!")
+            return
+
+        # 【v4】分钟线提示：tushare 当前仅支持日线，主动提示并中断
+        if data_type != "daily":
+            st.warning("⚠️ Tushare 数据源当前仅支持日线，分钟线暂未开通，请选择「日线」!")
+            return
+
+        # 显示加载状态
+        with st.spinner(f"🔄 正在分析 {stock_code}..."):
+            try:
+                logger.info(
+                    "开始分析 %s (%s ~ %s)", stock_code, start_date, end_date
+                )
+                # 调用缓存的分析函数（web 侧缓存，含 fetch_data + analyze）
+                result, summary = cached_analysis(
+                    stock_code,
+                    start_date.strftime("%Y-%m-%d"),
+                    end_date.strftime("%Y-%m-%d"),
+                    data_type,
+                    frequency,
+                )
+
+                # 结果摘要
+                st.success(
+                    f"✅ 分析完成：{stock_code} · "
+                    f"分型 {summary.get('fractal_count', '?')} 个 / "
+                    f"笔 {summary.get('segment_count', '?')} 个"
+                )
+
+                # 生成图表
+                data_type_with_freq = (
+                    data_type if data_type == "daily" else f"minute_{frequency}"
+                )
+                chart_obj = plotly_chanlun_visualization(
+                    result,
+                    start_idx=0,
+                    bars_to_show=len(result),
+                    data_type=data_type_with_freq,
+                    return_fig=True,
+                    stock_code=stock_code,
+                )
+
+                if chart_obj is not None:
+                    html_string = chart_obj.to_html(
+                        include_plotlyjs="cdn", full_html=False
+                    )
+                    st.components.v1.html(
+                        html_string, height=settings.CHART_HEIGHT, scrolling=True
+                    )
+                else:
+                    st.error("❌ 图表生成失败!")
+
+            except Exception as e:
+                logger.error("分析失败 %s: %s", stock_code, e)
+                st.error(f"❌ 分析失败: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()

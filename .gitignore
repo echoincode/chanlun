@@ -1,0 +1,19 @@
+# Phase 0 · Step 0-6 新建（仓库根此前无 .gitignore）
+# 严格按《分步执行清单》Step 0-6 要求写入 6 条规则
+
+# 备份目录（冻结基准，不纳入版本控制）
+project_backup/
+
+# 运行时缓存与产物目录
+cache/
+results/
+
+# 通达信最优服务器配置（运行时生成）
+best_server.json
+
+# Python 字节码缓存
+__pycache__/
+*.pyc
+
+# Git 自身元数据
+.git/

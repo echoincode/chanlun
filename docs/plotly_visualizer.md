@@ -1,8 +1,11 @@
-# plotly_visualizer.py - Plotly可视化工具
+# plotly_viz.py - Plotly可视化工具（v4）
 
 ## 📋 文件概述
 
-`plotly_visualizer.py` 是基于Plotly的缠论K线可视化工具，支持丰富的交互功能，包括拖拽缩放、hover信息、Y轴调节等现代化特性，可直接生成独立的HTML文件。
+`src/visual/plotly_viz.py` 是基于Plotly的缠论K线可视化工具，支持丰富的交互功能，包括拖拽缩放、hover信息、Y轴调节等现代化特性，可直接生成独立的HTML文件。
+
+> ⚠️ **v4 变更**：文件从根目录 `plotly_visualizer.py` 迁移至 `src/visual/plotly_viz.py`。
+> **v4.1 修复**：笔绘制从独立线段改为连续折线，解决"笔在乱画、不连续"的问题。
 
 ## 🎯 主要功能
 
@@ -10,7 +13,7 @@
 - **K线绘制**：红涨绿跌的蜡烛图
 - **成交量显示**：底部显示成交量柱状图
 - **分型标记**：顶分型（红色倒三角）、底分型（绿色正三角）
-- **笔绘制**：自动绘制上升笔（红色）和下降笔（绿色）
+- **笔绘制（v4.1 修复）**：所有笔端点连成**一条连续折线**，顶红点绿，确保笔与笔紧密相连
 - **丰富交互**：拖拽缩放、pan、hover信息、Y轴调节
 - **HTML导出**：原生支持HTML导出，无需额外库
 
@@ -74,15 +77,15 @@ def plot_chanlun_with_interaction(
 
 **使用示例**：
 ```python
-from plotly_visualizer import PlotlyChanlunVisualizer
+from src.visual.plotly_viz import plotly_chanlun_visualization
 
-visualizer = PlotlyChanlunVisualizer()
-fig = visualizer.plot_chanlun_with_interaction(
+fig = plotly_chanlun_visualization(
     data=result,
     start_idx=0,
     bars_to_show=100,
     data_type='daily',
-    show_plot=True
+    return_fig=True,
+    stock_code='600519.SH'
 )
 ```
 
@@ -126,7 +129,7 @@ def _add_fractals(self, plot_data, data_type='daily')
 - 底分型：绿色正三角（symbol='triangle-up'），大小6
 
 #### `_draw_segments(self, plot_data, data_type='daily')`
-绘制笔
+绘制笔（v4.1 连续折线版）
 
 ```python
 def _draw_segments(self, plot_data, data_type='daily')
@@ -137,12 +140,15 @@ def _draw_segments(self, plot_data, data_type='daily')
 - `data_type`：数据类型（'daily' 或 'minute'）
 
 **功能**：
-- 识别数据中的笔
-- 绘制笔连线
+- 识别数据中的笔端点
+- 将所有笔端点按时间顺序收集，连成**一条连续折线**
 
-**绘制规则**：
-- 上升笔：红色线条，线宽2.5
-- 下降笔：绿色线条，线宽2.5
+**绘制规则（v4.1 修复）**：
+- 所有笔端点收集到 `all_x`/`all_y` 数组
+- 一条 `go.Scatter` trace 包含全部端点（而非每笔独立线段）
+- 确保笔 0 终点 → 笔 1 起点 紧密相连
+- 端点颜色：顶分型红点 `#e74c3c`、底分型绿点 `#27ae60`
+- 线条颜色：深灰 `#333333`，线宽 2.5
 
 #### `_find_opposite_fractal(self, start_point, plot_data)`
 查找相反的分型作为笔的终点
@@ -176,18 +182,16 @@ def show(self)
 ### 基本使用
 
 ```python
-from plotly_visualizer import PlotlyChanlunVisualizer
+from src.visual.plotly_viz import plotly_chanlun_visualization
 
-# 创建可视化器
-visualizer = PlotlyChanlunVisualizer()
-
-# 绘制图表
-visualizer.plot_chanlun_with_interaction(
+# 创建图表并显示
+fig = plotly_chanlun_visualization(
     data=result,           # 缠论分析结果
     start_idx=0,           # 从第0根开始
     bars_to_show=100,      # 显示100根K线
     data_type='daily',     # 日线数据
-    show_plot=True         # 显示图表
+    return_fig=False,      # 直接显示（默认）
+    stock_code='600519.SH' # 股票代码（显示在标题中）
 )
 ```
 
@@ -195,7 +199,7 @@ visualizer.plot_chanlun_with_interaction(
 
 ```python
 # 显示第50-150根K线
-visualizer.plot_chanlun_with_interaction(
+plotly_chanlun_visualization(
     data=result,
     start_idx=50,
     bars_to_show=100,
@@ -218,7 +222,7 @@ visualizer.plot_chanlun_with_interaction(
 ### 导出HTML文件
 
 ```python
-from plotly_visualizer import plotly_chanlun_visualization
+from src.visual.plotly_viz import plotly_chanlun_visualization
 
 # 创建图表并导出HTML
 fig = plotly_chanlun_visualization(
@@ -226,7 +230,8 @@ fig = plotly_chanlun_visualization(
     start_idx=0,
     bars_to_show=100,
     data_type='daily',
-    return_fig=True  # 返回Figure对象
+    return_fig=True,  # 返回Figure对象
+    stock_code='600519.SH'
 )
 
 # 导出HTML
@@ -415,8 +420,7 @@ fig.show()
 | 蜡烛实体 | 开盘价和收盘价之间的矩形 | 红色（涨）/绿色（跌）|
 | 顶分型标记 | 倒三角形 | 红色 |
 | 底分型标记 | 正三角形 | 绿色 |
-| 上升笔 | 从底到顶的连线 | 红色 |
-| 下降笔 | 从顶到底的连线 | 绿色 |
+| 笔（v4.1） | 所有笔端点连成一条连续折线 | 深灰（线条）+ 红/绿（端点）|
 
 ### 成交量图元素
 

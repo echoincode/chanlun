@@ -1,8 +1,11 @@
-# enhanced_visualizer.py - Matplotlib可视化工具
+# enhanced_viz.py - Matplotlib可视化工具（v4）
 
 ## 📋 文件概述
 
-`enhanced_visualizer.py` 是基于Matplotlib的缠论K线可视化工具，提供鼠标悬停交互功能和完整的笔绘制功能，支持将图表导出为HTML文件。
+`src/visual/enhanced_viz.py` 是基于Matplotlib的缠论K线可视化工具，提供鼠标悬停交互功能和完整的笔绘制功能，支持将图表导出为HTML文件。
+
+> ⚠️ **v4 变更**：文件从根目录 `enhanced_visualizer.py` 迁移至 `src/visual/enhanced_viz.py`。
+> 本模块为备选方案，主力可视化方案见 [plotly_visualizer.md](plotly_visualizer.md)。
 
 ## 🎯 主要功能
 
@@ -72,7 +75,7 @@ def plot_chanlun_with_interaction(
 
 **使用示例**：
 ```python
-from enhanced_visualizer import EnhancedChanlunVisualizer
+from src.visual.enhanced_viz import EnhancedChanlunVisualizer
 
 visualizer = EnhancedChanlunVisualizer()
 visualizer.plot_chanlun_with_interaction(
@@ -243,7 +246,7 @@ def on_mouse_move(self, event)
 ### 基本使用
 
 ```python
-from enhanced_visualizer import EnhancedChanlunVisualizer
+from src.visual.enhanced_viz import EnhancedChanlunVisualizer
 
 # 创建可视化器
 visualizer = EnhancedChanlunVisualizer()
@@ -285,7 +288,7 @@ visualizer.plot_chanlun_with_interaction(
 ### 导出HTML文件
 
 ```python
-from enhanced_visualizer import enhanced_chanlun_visualization
+from src.visual.enhanced_viz import enhanced_chanlun_visualization
 
 # 导出为HTML文件
 success = enhanced_chanlun_visualization(
@@ -570,6 +573,6 @@ required_columns = ['datetime', 'open', 'high', 'low', 'close',
 
 - [Plotly可视化工具](plotly_visualizer.md)
 - [缠论核心算法](chanlun_processor.md)
-- [BaoStock分析主程序](baostock_chanlun.md)
+- [BaoStock分析主程序](baostock_chanlun.md) ⛔ v4 已弃用（baostock 数据源弃用）
 - [Matplotlib官方文档](https://matplotlib.org/)
 - [mpld3文档](https://github.com/mpld3/mpld3)

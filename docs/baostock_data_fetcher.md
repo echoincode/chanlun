@@ -1,3 +1,5 @@
+> ⛔ **v4 已弃用**：数据源已统一为 Tushare（私有代理 ts-2.cwy666.com），**baostock 已弃用**，本文档仅作历史归档参考，不再维护。对应代码 `baostock_data_fetcher.py` 保留在 `project_backup/` 冻结，不进入改造区。弃用原因：baostock 在当前环境无法获取 ETF 行情（实测 `sh.510300`/`sh.510180` 等均返回空）。详见《缠论项目工程优化-分步执行清单.md》Step 3-2。
+
 # baostock_data_fetcher.py - BaoStock数据获取器
 
 ## 📋 文件概述

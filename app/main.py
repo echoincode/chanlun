@@ -1,6 +1,9 @@
 """
 Streamlit GUI for Chanlun K-Line Analysis Tool
 缠论K线分析工具 - Streamlit图形界面
+
+⚠️ 【过渡期旧入口】新入口见 web/app.py（Phase 5 改造后），本文件保留仅为
+保证 streamlit run app/main.py 仍可运行；待 web 入口稳定后废弃（Phase 7）。
 """
 
 import streamlit as st

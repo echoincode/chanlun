@@ -1,5 +1,7 @@
 
 
+> ⛔ **v4 已弃用**：数据源已统一为 Tushare（私有代理 ts-2.cwy666.com），**mootdx 已弃用**，本文档仅作历史归档参考，不再维护。对应代码保留在 `project_backup/` 冻结，不进入改造区。弃用原因：mootdx 0.11.7 对历史日期范围查询存在固有 bug（`get_k_data` 偏移计算错误 → 空 DataFrame → `KeyError: 'datetime'`），且行情服务器权限/连通性不稳定。详见《缠论项目工程优化-分步执行清单.md》Step 3-2 / 6-2。
+
 1、mootdx获取A股日k线数据使用方法：
 from mootdx.quotes import Quotes
 client = Quotes.factory(market='std')

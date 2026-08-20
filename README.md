@@ -1,461 +1,252 @@
 # 缠论K线分析工具 (Chanlun K-Line Analysis Tool)
 
-基于Python实现的缠论K线分析工具，支持多市场数据获取、分型识别、笔段分析和交互式可视化。
+基于 Python 实现的缠论技术分析系统，提供从 Tushare 数据获取到缠论算法分析（分型识别、笔段分析）的全流程支持，含 CLI 命令行和 Web 图形界面两种入口。
 
 ## 🎯 项目简介
 
-本项目是一个完整的缠论技术分析系统，提供从数据获取到可视化分析的全流程支持。支持A股、ETF、港股、指数等多市场数据，基于缠论理论实现分型识别、笔段分析等核心功能，并提供多种可视化方案。项目包含命令行工具和现代化的Web图形界面。
+本项目是缠论技术分析的工程化实现，核心特性：
+- **单一数据源**：v4 统一使用 Tushare（支持 A股/ETF/指数），经私有代理取数稳定
+- **缠论核心算法**：分型识别（顶/底分型）、笔段分析（上升/下降笔）、K线合并（包含关系处理）
+- **双入口**：CLI 命令行工具（`scripts/run_tushare.py`）+ Web 图形界面（`web/app.py`）
+- **交互式可视化**：Plotly 图表，支持拖拽缩放、Hover 详情、自适应宽度
 
 ## ✨ 主要特性
 
-### 📊 多市场支持
-- **A股市场**：沪深交易所（sh./sz.前缀）
-- **ETF基金**：科创板ETF、创业板ETF等
-- **港股市场**：港股日线和分钟K线数据
-- **指数数据**：上证指数、深证成指等
-
-### 🔧 双数据源支持
-- **BaoStock**：稳定可靠的免费数据源（baostock_data_fetcher.py）
-- **Mootdx**：通达信数据接口，支持更丰富的市场（mootdx_data_fetcher.py）
+### 📊 数据支持范围
+- **A股日线**：沪深交易所（如 600000.SH / 000001.SZ）
+- **ETF 日线**：科创板/创业板 ETF（如 510300.SH / 159915.SZ）
+- **指数日线**：上证/深证指数（如 000300.SH 沪深300）
+- **港股**：暂不支持（需单独权限，主动提示并中断）
+- **分钟线**：暂不支持（Tushare 当前仅开通日线，主动提示并中断）
 
 ### 📈 缠论核心算法
-- **分型识别**：顶分型、底分型自动识别
-- **K线合并**：基于包含关系的K线合并
-- **笔段分析**：自动识别上升笔、下降笔
-- **多重筛选**：极值筛选、连续分型筛选、关系验证等
+- **极值修剪**：按历史最高/最低价确定序列起点，丢弃无用区间
+- **K线合并**：基于包含关系合并相邻 K 线，生成缠论 K 线
+- **分型识别**：顶分型/底分型自动识别，经 11 根窗口筛选、连续分型筛选、关系验证、接近分型筛选
+- **笔段分析**：按交叉原则（顶底交替）连接有效分型，形成上升/下降笔
 
-### 🎨 交互式可视化
-- **Plotly版本**：丰富的交互功能（拖拽缩放、hover信息、Y轴调节）
-- **Matplotlib版本**：鼠标悬停交互，支持导出HTML
-- **Web图形界面**：基于Streamlit的现代化GUI，实时显示分析结果
-
-### 🚀 高级特性
-- **分批次数据获取**：支持长时间跨度的分钟数据获取，每批固定800条
-- **智能数据缓存**：本地缓存机制，提升数据加载速度
-- **多服务器支持**：自动测试并选择最优通达信服务器
-- **错误重试机制**：自动处理网络异常和API错误
+### 🎨 可视化
+- **Plotly 交互式图表**：K线图 + 成交量图双视图，支持拖拽缩放、Hover 详情
+- **连续笔折线**：所有笔端点按时间顺序连成 Z 字形折线，直观展示笔段走势
+- **Web 界面**：Streamlit 现代化 GUI，参数配置 + 实时分析 + 图表展示
 
 ## 📁 项目结构
 
 ```
 chanlun/
-├── baostock_chanlun.py          # BaoStock版缠论分析主程序
-├── baostock_data_fetcher.py      # BaoStock数据获取器
-├── mootdx_chanlun.py             # Mootdx版缠论分析主程序
-├── mootdx_data_fetcher.py        # Mootdx数据获取器（支持分批次获取）
-├── chanlun_processor.py          # 缠论核心算法处理器
-├── enhanced_visualizer.py        # Matplotlib可视化工具
-├── plotly_visualizer.py          # Plotly可视化工具
-├── requirements.txt               # Python依赖包
-├── app/                          # Streamlit Web图形界面
-│   ├── main.py                   # 主应用入口
-│   ├── config.py                 # 应用配置
-│   ├── utils.py                  # 工具函数集合
-│   └── README.md                 # Web界面使用说明
+├── src/                          # 源码目录（Phase 1-4 新建）
+│   ├── config/
+│   │   └── settings.py           # 集中配置常量（PAGE_CONFIG/CACHE_TTL 等）
+│   ├── data/
+│   │   ├── base_fetcher.py       # 数据获取抽象基类
+│   │   └── tushare_fetcher.py    # Tushare 数据获取器（唯一数据源）
+│   ├── core/
+│   │   └── chanlun_processor.py  # 缠论核心算法处理器（业务算法 100% 不动）
+│   ├── cli/
+│   │   └── runner.py             # CLI/Web 共用计算核心（fetch_data + analyze）
+│   ├── utils/
+│   │   ├── common.py             # 通用工具（normalize_stock_code 等）
+│   │   └── logger.py             # 统一日志模块
+│   └── visual/
+│       └── plotly_viz.py         # Plotly 可视化（含笔连续折线修复）
+├── web/                          # Web 界面（Phase 5 新建）
+│   ├── app.py                    # Streamlit 主入口
+│   └── styles.py                 # CSS 样式注入
+├── scripts/                      # 脚本目录（Phase 6 新建）
+│   ├── run_tushare.py            # CLI 命令行入口（交互式循环）
+│   └── gen_golden_samples.py     # 黄金样本生成脚本（调试用）
+├── tests/                        # 测试目录
+│   └── golden_samples/           # 黄金样本数据（3 组 CSV + expected.json）
+├── app/                          # ⚠️ 过渡期旧入口（Phase 7 待删除）
+│   ├── main.py                   # 旧 Web 入口（仍可运行）
+│   └── utils.py                  # 旧工具函数
 ├── docs/                         # 文档目录
-│   ├── README.md                 # 详细文档
-│   └── mootdx.md                 # Mootdx说明文档
-├── results/                      # 分析结果输出目录
-│   └── *.html                    # 生成的HTML图表文件
-└── best_server.json              # Mootdx最优服务器配置
+├── results/                      # 分析结果输出目录（HTML 图表）
+├── project_backup/               # 完整代码备份（改造前冻结）
+├── requirements.txt              # Python 依赖
+└── .gitignore
 ```
 
 ## 🚀 快速开始
 
-### 环境安装
+### 1. 环境准备
 
 ```bash
 # 克隆项目
 git clone <repository-url>
 cd chanlun
 
+# 创建虚拟环境
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# macOS/Linux
+source venv/bin/activate
+
 # 安装依赖
 pip install -r requirements.txt
+
+# 设置 Tushare Token（必须）
+# Windows PowerShell
+$env:TUSHARE_TOKEN = "your_tushare_token"
+# macOS/Linux
+export TUSHARE_TOKEN="your_tushare_token"
 ```
 
-### 使用方式
-
-#### 方式一：命令行工具
-
-**1. BaoStock版本（推荐A股分析）**
+### 2. 方式一：CLI 命令行
 
 ```bash
-python baostock_chanlun.py
+python scripts/run_tushare.py
 ```
 
-**2. Mootdx版本（支持多市场）**
+交互式输入参数：
+```
+📝 请输入分析参数（直接回车使用默认值）：
+股票代码（默认 600000）: 600519.SH
+开始日期（默认 2024-01-01）: 2020-01-01
+结束日期（默认 2025-01-10）: 2024-12-31
+```
+
+分析完成后自动保存 HTML 图表到 `results/` 目录，并在浏览器中打开交互图表。
+
+### 3. 方式二：Web 图形界面（推荐）
 
 ```bash
-python mootdx_chanlun.py
+streamlit run web/app.py
 ```
 
-**3. 运行测试**
+浏览器访问 http://localhost:8501：
+- 左侧边栏配置参数（股票代码、日期范围）
+- 点击「🚀 开始分析」或直接修改代码自动触发
+- 右侧展示分析结果摘要和交互式图表
 
-```bash
-# 测试BaoStock数据获取
-python baostock_data_fetcher.py
+### 4. 股票代码格式
 
-# 测试Mootdx数据获取
-python mootdx_data_fetcher.py
-
-# 测试缠论处理算法
-python chanlun_processor.py
-```
-
-#### 方式二：Web图形界面（推荐）
-
-基于Streamlit的现代化Web界面，提供直观的可视化操作体验：
-
-```bash
-# 启动Web应用
-streamlit run app/main.py
-```
-
-浏览器将自动打开 http://localhost:8501，你可以：
-- 在左侧边栏输入参数（股票代码、日期范围、数据源等）
-- 实时查看顶部的分析结果和交互式图表
-- 支持拖拽缩放、悬停查看详情等交互功能
-
-## 📝 使用说明
-
-### 方式一：交互式命令行
-
-运行程序后会提示输入参数：
-
-```
-请输入分析参数（直接回车使用默认值）：
-股票代码（支持A股/ETF/指数/港股，默认 600000）:
-开始日期（默认 2024-01-01）:
-结束日期（默认 2025-12-29）:
-
-数据类型选择：
-1. 日线数据（默认）
-2. 分钟线数据
-请选择 (1-2):
-```
-
-### 方式二：Web图形界面
-
-启动Web界面后：
-
-1. **左侧参数配置**
-   - 股票代码：输入6位数字代码（如600000）
-   - 日期范围：选择开始和结束日期
-   - 数据源：选择mootdx或baostock
-   - 数据类型：日线或分钟线
-   - 分钟周期：5/15/30/60分钟
-
-2. **开始分析**
-   - 点击"🚀 开始分析"按钮
-   - 等待数据加载和处理完成
-
-3. **查看结果**
-   - 顶部统计卡片显示关键指标
-   - 中间交互式图表展示K线和缠论分析
-   - 支持拖拽缩放、悬停查看详情
-
-4. **保存结果**
-   - HTML文件自动保存到`results/`目录
-   - 可在浏览器中打开离线查看
-
-### 支持的股票代码格式
-
-| 市场类型 | 代码示例 | 说明 |
+| 市场类型 | 代码格式 | 示例 |
 |---------|---------|------|
-| A股（沪市） | `600000` 或 `sh.600000` | 浦发银行 |
-| A股（深市） | `000001` 或 `sz.000001` | 平安银行 |
-| ETF基金 | `588000` 或 `159915` | 科创ETF、创业板ETF |
-| 指数 | `000001` 或 `399001` | 上证指数、深证成指 |
-| 港股 | `00700` 或 `00700.HK` | 腾讯控股 |
-| 北交所 | `830799` 或 `bj.830799` | 安达科技 |
+| A股（沪市） | `XXXXXX.SH` | `600000.SH` 浦发银行 |
+| A股（深市） | `XXXXXX.SZ` | `000001.SZ` 平安银行 |
+| ETF（沪市） | `5XXXXX.SH` | `510300.SH` 沪深300ETF |
+| ETF（深市） | `159XXX.SZ` | `159915.SZ` 创业板ETF |
+| 指数（上证） | `000XXX.SH` | `000300.SH` 沪深300指数 |
+| 港股 | `XXXXX.HK` | ⚠️ 暂不支持，主动提示 |
+| 旧前缀兼容 | `sh.XXXXXX` | 自动转换为 `XXXXXX.SH` |
 
-### API使用示例
-
-#### BaoStock版本
-
-```python
-from baostock_data_fetcher import AStockDataFetcher
-from chanlun_processor import ChanlunProcessor
-
-# 获取数据
-with AStockDataFetcher() as fetcher:
-    data = fetcher.get_daily_data(
-        stock_code="sh.600000",
-        start_date="2024-01-01",
-        end_date="2025-12-29"
-    )
-
-# 缠论分析
-processor = ChanlunProcessor()
-result = processor.process_klines(data)
-summary = processor.get_processing_summary()
-
-print(f"缠论K线: {summary['chanlun_count']} 根")
-print(f"顶分型: {summary['top_fractal_count']} 个")
-print(f"底分型: {summary['bottom_fractal_count']} 个")
-```
-
-#### Mootdx版本（多市场）
+## 📝 API 使用示例
 
 ```python
-from mootdx_data_fetcher import MootdxDataFetcher
-from chanlun_processor import ChanlunProcessor
+import os
+import sys
+sys.path.insert(0, ".")
+os.environ["TUSHARE_TOKEN"] = "your_token"
 
-with MootdxDataFetcher() as fetcher:
-    # 获取港股数据
-    data = fetcher.get_hk_stock_data(
-        stock_code="00700",
-        start_date="2024-01-01",
-        end_date="2025-12-29",
-        data_type='daily'
-    )
+from src.cli.runner import fetch_data, analyze
+from src.visual.plotly_viz import plotly_chanlun_visualization
 
-# 缠论分析（与BaoStock版本相同）
-processor = ChanlunProcessor()
-result = processor.process_klines(data)
-```
+# 1. 获取数据
+df = fetch_data("600519.SH", "2020-01-01", "2024-12-31", data_type="daily")
 
-### 可视化使用
+# 2. 缠论分析
+result, summary = analyze(df)
+print(f"分型: {summary.get('fractal_count')} 个 / 笔: {summary.get('segment_count')} 个")
 
-```python
-from plotly_visualizer import plotly_chanlun_visualization
-
-# 显示交互式图表
-plotly_chanlun_visualization(
-    data=result,
-    start_idx=0,
-    bars_to_show=100,
-    data_type='daily'
+# 3. 可视化
+fig = plotly_chanlun_visualization(
+    result, start_idx=0, bars_to_show=len(result),
+    data_type="daily", return_fig=True, stock_code="600519.SH"
 )
+fig.show()
+```
+
+## 📊 输出说明
+
+### CLI 控制台输出示例
+
+```
+🎯 缠论K线分析工具（CLI）
+========================================
+💡 数据源：Tushare（唯一），当前支持 A股/ETF/指数，仅日线
+
+📝 请输入分析参数（直接回车使用默认值）：
+股票代码（默认 600000）: 600519.SH
+开始日期（默认 2024-01-01）: 2020-01-01
+结束日期（默认 2025-01-10）: 2024-12-31
+
+==================================================
+📊 正在分析 600519.SH（日线 2020-01-01 ~ 2024-12-31）...
+✅ 获取数据 1212 根K线
+🎯 缠论K线: 42 根
+🔺 顶分型: 3 个
+🔻 底分型: 4 个
+✏️ 笔: 6 个
+✅ HTML文件已保存: results/600519.SH_2020-01-01_2024-12-31_daily.html
 ```
 
 ## 🔬 核心算法说明
 
 ### 1. 数据预处理
-- **极值修剪**：根据最高价和最低价修剪K线数据
-- **K线合并**：基于包含关系合并K线生成缠论K线
-- **方向判断**：根据趋势确定上升/下降方向
-- **分批次获取**：支持长时间跨度数据的多批次获取，每批固定800条
+- **极值修剪**：根据历史最高/最低价确定序列起点，丢弃该点之前的数据
+- **K线合并**：基于包含关系合并相邻 K 线，生成缠论 K 线
+- **方向判断**：根据极值点类型确定初始方向（最高价在前→向下，最低价在前→向上）
 
 ### 2. 分型识别
-- **顶分型**：中间K线的高点是连续3根中最高的
-- **底分型**：中间K线的低点是连续3根中最低的
-- **多重筛选**：
-  - 极值筛选（11根K线窗口）
-  - 连续分型筛选
-  - 分型关系验证
-  - 接近分型筛选
+- **顶分型**：中间 K 线高点为连续 3 根中最高
+- **底分型**：中间 K 线低点为连续 3 根中最低
+- **多重筛选**：11 根窗口筛选 → 连续分型筛选 → 关系验证 → 接近分型筛选（间隔≥4）
 
 ### 3. 笔段分析
 - **交叉原则**：顶分型与底分型交替出现
-- **上升笔**：从底分型到顶分型
-- **下降笔**：从顶分型到底分型
-
-### 4. 数据获取优化
-- **智能缓存**：本地缓存机制，TTL为1小时，避免重复获取
-- **分批次获取**：按时间计算总K线数量，分批次每批800条
-- **错误重试**：连续空批检测（最多2次），自动处理异常
-- **多服务器支持**：自动测试并选择最优通达信服务器
-
-## 📦 依赖包说明
-
-| 包名 | 版本要求 | 用途 |
-|-----|---------|------|
-| pandas | >=1.5.0 | 数据处理 |
-| numpy | >=1.21.0 | 数值计算 |
-| plotly | >=5.0.0 | 交互式可视化 |
-| matplotlib | >=3.5.0 | 基础可视化 |
-| mpld3 | >=0.5.0 | Matplotlib转HTML |
-| streamlit | >=1.28.0 | Web图形界面 |
-| baostock | >=0.8.8 | BaoStock数据源 |
-| pytdx | >=1.72 | 通达信接口 |
-| mootdx | >=0.4.6 | Mootdx数据源 |
-
-## 🎯 功能对比
-
-| 功能特性 | BaoStock版本 | Mootdx版本 | Web图形界面 |
-|---------|-------------|-----------|-----------|
-| A股日线数据 | ✅ | ✅ | ✅ |
-| A股分钟数据 | ✅ | ✅ | ✅ |
-| ETF数据 | ❌ | ✅ | ✅ |
-| 港股数据 | ❌ | ✅ | ✅ |
-| 指数数据 | ❌ | ✅ | ✅ |
-| 北交所数据 | ❌ | ✅ | ✅ |
-| 分批次获取 | ❌ | ✅ | ✅ |
-| 数据缓存 | ❌ | ✅ | ✅ |
-| 交互式图表 | ✅ | ✅ | ✅ |
-| Web界面 | ❌ | ❌ | ✅ |
-| 数据稳定性 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ |
-| 数据延迟 | 高 | 低 | 低 |
-| 推荐场景 | 稳定A股分析 | 多市场实时分析 | 快速可视化分析 |
-
-## 📊 输出说明
-
-### 控制台输出示例
-
-```
-📊 正在分析 sh.600000 (A股 日线)...
-正在获取 sh.600000 的日K线数据 (2024-01-01 至 2025-12-29)...
-数据清洗完成：原始数据 492 行，清洗后 492 行
-✅ 获取数据 492 根K线
-数据修剪完成:
-  - 最高价: 52.31 发生时间: 2024-05-06 00:00:00
-  - 最低价: 7.53 发生时间: 2025-02-06 00:00:00
-  - 选择较早的最低价时间点: 2025-02-06 00:00:00
-  - 原始数据: 492 行
-  - 修剪后数据: 225 行
-  - 丢弃数据: 267 行
-K线合并完成：原始 225 根K线合并为 158 根缠论K线
-分型识别完成:
-  - 顶分型数量: 8
-  - 底分型数量: 7
-  - 总分型数量: 15
-🎯 缠论K线: 158 根
-🔺 顶分型: 8 个
-🔻 底分型: 7 个
-✅ HTML文件已保存: results/sh.600000_2024-01-01_2025-12-29_daily.html
-✅ Plotly交互图表显示成功
-```
-
-### 结果文件
-
-分析完成后，在`results/`目录生成HTML文件：
-- 文件命名格式：`{前缀}_{股票代码}_{开始日期}_{结束日期}_{数据类型}.html`
-- 支持在浏览器中打开查看交互式图表
+- **上升笔**：底分型 → 顶分型
+- **下降笔**：顶分型 → 底分型
 
 ## ⚙️ 配置说明
 
-### Mootdx最佳线路配置
+### 环境变量
+| 变量名 | 必填 | 说明 |
+|--------|------|------|
+| `TUSHARE_TOKEN` | ✅ | Tushare API Token（私有代理 token） |
+| `CHANLUN_LOG_LEVEL` | ❌ | 日志级别（默认 INFO） |
 
-程序会自动测试通达信服务器并保存最优线路到`best_server.json`：
-- 配置文件格式：
-```json
-{
-  "optimal_server": "114.80.63.12:7709",
-  "latency_ms": 45.23,
-  "last_updated": "2025-12-29T10:30:00"
-}
-```
-- 配置有效期：7天，过期后自动重新测试
-
-### 数据清洗规则
-
-- **价格异常值**：剔除偏离超过3个标准差的数据
-- **成交量异常值**：剔除偏离超过5个标准差的数据
-- **价格逻辑检查**：确保 high ≥ low，high ≥ open/close，low ≤ open/close
-
-## ⚙️ 配置说明
-
-### Mootdx最佳线路配置
-
-程序会自动测试通达信服务器并保存最优线路到`best_server.json`：
-- 配置文件格式：
-```json
-{
-  "optimal_server": "114.80.63.12:7709",
-  "latency_ms": 45.23,
-  "last_updated": "2025-12-29T10:30:00"
-}
-```
-- 配置有效期：7天，过期后自动重新测试
-
-### 数据缓存配置
-
-Web界面使用本地缓存机制提升数据加载速度：
-- 缓存目录：`.cache/stock_data/`
-- 缓存TTL：1小时
-- 自动清理：超过7天的缓存文件
-
-### 数据清洗规则
-
-- **价格异常值**：剔除偏离超过3个标准差的数据
-- **成交量异常值**：剔除偏离超过5个标准差的数据
-- **价格逻辑检查**：确保 high ≥ low，high ≥ open/close，low ≤ open/close
-
-### 分批次获取配置
-
-| 市场类型 | 每批数量 | 交易时长 | 复权支持 |
-|---------|---------|---------|---------|
-| A股分钟 | 800 | 4小时 | ✅ |
-| 港股 | 700 | 5.5小时 | ✅ |
-| ETF | 800 | 4小时 | ❌ |
-| 指数 | 800 | 4小时 | ✅ |
-
-- 最大连续空批次数：2次
-- 批次间延迟：1秒
-- 自动停止条件：满足所需数量或连续空批2次
+### 关键配置（`src/config/settings.py`）
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `CACHE_TTL` | 3600 | 数据缓存时间（秒） |
+| `CHART_HEIGHT` | 800 | 图表高度（像素） |
+| `DEFAULT_CODE` | "600000" | 默认股票代码 |
+| `DATA_SOURCES` | {"tushare"} | 唯一数据源 |
 
 ## 🐛 常见问题
 
-### Q1: Mootdx连接失败怎么办？
+### Q1: 提示 "Tushare token 缺失"
+设置环境变量 `TUSHARE_TOKEN`，或在 `src/config/settings.py` 中配置。
 
-A: 检查网络连接，或手动删除`best_server.json`让程序重新测试线路。
+### Q2: 港股输入显示警告
+Tushare 当前仅支持 A股/ETF/指数日线，港股需单独权限。请使用 A股代码。
 
-### Q2: 港股数据获取失败？
+### Q3: 分钟线选择显示警告
+Tushare 尚未开通分钟线权限，当前仅支持日线。
 
-A: 确保股票代码格式正确（如00700），并检查网络是否可以访问港股服务器。
-
-### Q3: 分钟数据获取为空？
-
-A: 程序已实现分批次获取功能，支持长时间跨度的分钟数据。如果仍然获取失败，建议：
-- 缩短时间范围
-- 检查网络连接
-- 尝试切换数据源（mootdx/baostock）
-
-### Q4: Web界面启动失败？
-
-A: 确保已安装streamlit：
+### Q4: Web 界面启动失败
 ```bash
 pip install streamlit
-```
-然后启动应用：
-```bash
-streamlit run app/main.py
+streamlit run web/app.py
 ```
 
-### Q5: 可视化图表无法显示？
-
-A: 确保安装了plotly或matplotlib，并检查浏览器是否支持HTML显示。
+### Q5: 图形异常（笔不连续）
+该问题已在 v4.1 修复。请使用最新版本的 `src/visual/plotly_viz.py`。
 
 ## 📚 详细文档
 
-- [BaoStock版本使用说明](docs/baostock_chanlun.md)
-- [Mootdx版本使用说明](docs/mootdx_chanlun.md)
-- [Web图形界面使用说明](app/README.md)
+- [工程优化与界面美化改造方案](docs/工程优化与界面美化改造方案.md)
+- [分步执行清单](docs/缠论项目工程优化-分步执行清单.md)
 - [缠论核心算法文档](docs/chanlun_processor.md)
 - [可视化工具文档](docs/visualization.md)
 
-## 🤝 贡献指南
+## ⚠️ 过渡期说明
 
-欢迎贡献代码、报告问题或提出建议！
-
-### 开发流程
-1. Fork项目
-2. 创建特性分支
-3. 提交更改
-4. 推送到分支
-5. 创建Pull Request
-
-## 📄 许可证
-
-本项目采用MIT许可证。
-
-## 📞 联系方式
-
-如有问题或建议，请通过以下方式联系：
-- 提交Issue
-- 发送邮件
-- 加入讨论组
-
-## 🎉 致谢
-
-感谢以下开源项目：
-- BaoStock - 提供免费A股数据
-- Mootdx - 通达信数据接口
-- Plotly - 交互式可视化库
-- Matplotlib - 基础可视化库
-- Streamlit - Web应用框架
+- **旧入口** `app/main.py` 仍可运行（`streamlit run app/main.py`），但将在 Phase 7 后续版本废弃
+- **建议**：新功能请使用 `web/app.py` 或 `scripts/run_tushare.py`
 
 ---
 
-**注意**：本工具仅供学习和研究使用，不构成任何投资建议。投资有风险，入市需谨慎。
+**注意**：本工具仅为缠论算法学习与研究的工程化尝试，不构成任何投资建议。投资有风险，入市需谨慎。
