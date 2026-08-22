@@ -33,7 +33,7 @@ services:
     volumes:
       - ./results:/app/results
     # 进入交互式 shell，由用户在容器内手动运行脚本
-    command: ["python", "scripts/run_tushare.py"]
+    command: ["bash"]
     stdin_open: true
     tty: true
     profiles:
