@@ -13,6 +13,17 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
+
+def _fmt_vol(vol_shares):
+    """把成交量(股)格式化为中文单位字符串：万/亿，如 '2085万' / '20.85亿'。"""
+    h = vol_shares / 100.0  # 转手数
+    if h >= 1e8:
+        return f"{h / 1e8:.2f}亿"
+    if h >= 1e4:
+        return f"{h / 1e4:.0f}万"
+    return f"{h:.0f}"
+
+
 class PlotlyChanlunVisualizer:
     """基于Plotly的缠论可视化器"""
     
@@ -208,12 +219,12 @@ class PlotlyChanlunVisualizer:
             if data_type.startswith('minute_'):
                 # 分钟K线使用数值索引
                 x_values = list(range(len(plot_data)))
-                hover_text = [f"时间: {dt}<br>成交量: {v:.2f}" 
+                hover_text = [f"时间: {dt}<br>成交量: {_fmt_vol(v)}"
                             for dt, v in zip(plot_data['datetime'], plot_data['volume'])]
-                
+
                 volume = go.Bar(
                     x=x_values,
-                    y=plot_data['volume'],
+                    y=plot_data['volume'] / 100.0,
                     name='成交量',
                     marker_color=colors,
                     opacity=0.7,
@@ -224,10 +235,12 @@ class PlotlyChanlunVisualizer:
                 # 日线使用字符串日期（类别轴，无空白）
                 volume = go.Bar(
                     x=x_labels,
-                    y=plot_data['volume'],
+                    y=plot_data['volume'] / 100.0,
                     name='成交量',
                     marker_color=colors,
-                    opacity=0.7
+                    opacity=0.7,
+                    hovertemplate='时间: %{x}<br>成交量: %{customdata}<extra></extra>',
+                    customdata=[_fmt_vol(v) for v in plot_data['volume']]
                 )
             
             self.fig.add_trace(volume, row=2, col=1)
@@ -531,7 +544,7 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
         low=plot_data['low'],
         close=plot_data['close'],
         name='K线',
-        customdata=plot_data['volume'],
+        customdata=[_fmt_vol(v) for v in plot_data['volume']],
         increasing_line_color='#ef5350',
         decreasing_line_color='#26a69a',
         increasing_fillcolor='#ef5350',
@@ -564,11 +577,12 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
                   for c, o in zip(plot_data['close'], plot_data['open'])]
     vol = go.Bar(
         x=x_labels,
-        y=plot_data['volume'],
+        y=plot_data['volume'] / 100.0,
         name='成交量',
         marker_color=vol_colors,
         opacity=0.7,
-        hovertemplate='时间: %{x}<br>成交量: %{y}<extra></extra>'
+        hovertemplate='时间: %{x}<br>成交量: %{customdata}<extra></extra>',
+        customdata=[_fmt_vol(v) for v in plot_data['volume']]
     )
     fig.add_trace(vol, row=2, col=1)
 
@@ -632,7 +646,7 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
             '时间: %{x}<br>'
             '开: %{open:.2f}<br>高: %{high:.2f}<br>'
             '低: %{low:.2f}<br>收: %{close:.2f}<br>'
-            '量: %{customdata:,.0f}'
+            '量: %{customdata}'
             '<extra></extra>'
         ),
         selector=dict(type='candlestick'),

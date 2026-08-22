@@ -140,3 +140,24 @@ TUSHARE_RATE_LIMIT_PER_MIN = 120              # 私有代理频率限制：120 �
 # 输出目录（app/main.py 使用的 results / cache 路径）
 RESULTS_DIR = "results"
 CACHE_DIR = "cache"
+
+# 每日收盘分型监控 - 通知渠道配置
+# NOTIFY_CHANNEL: 通知渠道，可选 feishu / wecom / none（none 仅打印不推送，用于本地调试）
+NOTIFY_CHANNEL = os.environ.get("NOTIFY_CHANNEL", "none").strip().lower()
+# 飞书自定义机器人 webhook 及可选签名密钥
+FEISHU_WEBHOOK = os.environ.get("FEISHU_WEBHOOK", "")
+FEISHU_SECRET = os.environ.get("FEISHU_SECRET", "")  # 开启签名校验时填写
+# 企业微信群机器人 webhook
+WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK", "")
+# 监控触发时间（本地时区，HH:MM），默认收盘后 16:30
+NOTIFY_TIME = os.environ.get("NOTIFY_TIME", "16:30").strip()
+# 监控回看天数（取数区间长度，保证分型识别充分）
+NOTIFY_LOOKBACK_DAYS = int(os.environ.get("NOTIFY_LOOKBACK_DAYS", "120"))
+# 监控标的：逗号分隔的标准化代码列表（如 "600519.SH,000001.SZ,513050.SH"）
+# 留空表示不监控任何标的（脚本退出，Web 按钮提示配置）。
+_MONITOR_CODES_RAW = os.environ.get("MONITOR_CODES", "")
+MONITOR_CODES = (
+    [c.strip() for c in _MONITOR_CODES_RAW.split(",") if c.strip()]
+    if _MONITOR_CODES_RAW
+    else []
+)

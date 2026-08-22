@@ -31,6 +31,8 @@ from src.config import settings
 from src.utils.common import get_default_end_date, get_market_type, normalize_stock_code
 from src.utils.logger import get_logger
 from src.visual.plotly_viz import plotly_chanlun_visualization, plotly_daily_candlestick
+from scripts.monitor_job import run_monitor
+from src.data.stock_names import get_stock_name, load_stock_names
 from web.auth import check_password
 from web.styles import inject_styles
 
@@ -127,7 +129,8 @@ def main():
             # 数据类型（v4：保留控件，选分钟线时提示中断）
             data_type = st.radio(
                 "数据类型",
-                ["daily", "minute"],
+                # 暂时注释分钟线选项，仅保留日线
+                ["daily"],  # ["daily", "minute"],
                 format_func=lambda x: "日线" if x == "daily" else "分钟线",
                 horizontal=True,
             )
@@ -153,6 +156,50 @@ def main():
                 value=True,
                 help="在原始蜡烛图上叠加 MA5/10/20/30/60 均线（基于区间收盘价）",
             )
+
+        # 每日收盘监控：手动立即触发（复用 scripts/monitor_job.run_monitor）
+        with st.container(border=True):
+            st.markdown("**🔔 每日收盘监控**")
+            # 拉取全市场标的字典并缓存到本地（cache/stock_names.json）
+            pull_button = st.button(
+                "📥 拉取全量标的",
+                use_container_width=True,
+                help="从 Baostock 拉取全市场代码-名称映射并保存到本地缓存",
+            )
+            if pull_button:
+                with st.spinner("🔄 正在拉取全市场标的..."):
+                    try:
+                        names = load_stock_names(force_refresh=True)
+                        st.success(f"✅ 已拉取 {len(names)} 只标的并保存到本地")
+                    except Exception as e:
+                        logger.error("拉取标的失败: %s", e)
+                        st.error(f"❌ 拉取失败: {str(e)}")
+
+            monitor_button = st.button(
+                "🚀 立即执行收盘监控",
+                use_container_width=True,
+                help="手动触发一次完整的收盘分型监控（等价于定时任务，随时可跑）",
+            )
+            if monitor_button:
+                with st.spinner("🔄 正在执行收盘监控..."):
+                    try:
+                        res = run_monitor(force=True)
+                        if not res["ran"]:
+                            st.warning(f"⚠️ 未执行：{res['skipped_reason']}")
+                        elif res["new_fractal"] > 0:
+                            st.success(
+                                f"✅ 监控完成：扫描 {res['scanned']} 只标的，"
+                                f"{res['new_fractal']} 只出现新分型（已推送）"
+                            )
+                        else:
+                            st.warning("⚠️ 监控完成，本次未检测到新分型")
+                        if res["messages"]:
+                            with st.expander("查看推送内容"):
+                                for msg in res["messages"]:
+                                    st.markdown(msg)
+                    except Exception as e:
+                        logger.error("监控按钮执行失败: %s", e)
+                        st.error(f"❌ 监控执行失败: {str(e)}")
 
         # 分析按钮
         analyze_button = st.button("🚀 开始分析", use_container_width=True)
@@ -202,8 +249,9 @@ def main():
                 )
 
                 # 结果摘要
+                stock_name = get_stock_name(stock_code)
                 st.success(
-                    f"✅ 分析完成：{stock_code} · "
+                    f"✅ 分析完成：{stock_name} · "
                     f"分型 {summary.get('fractal_count', '?')} 个 / "
                     f"笔 {summary.get('segment_count', '?')} 个"
                 )
@@ -224,7 +272,7 @@ def main():
 
                 # v5：日线蜡烛图对照面板（仅日线 + 开关开启时展示）
                 if data_type == "daily" and show_raw_candle:
-                    st.markdown("### 📈 日线蜡烛图（原始K线）")
+                    st.markdown(f"### 📈 日线蜡烛图（原始K线）· {stock_name}")
                     candle_obj = plotly_daily_candlestick(
                         result, stock_code=stock_code, return_fig=True, show_ma=show_ma
                     )

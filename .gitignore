@@ -8,7 +8,11 @@ project_backup/
 cache/
 !cache/
 !cache/*.csv
+!cache/stock_names.json
 results/
+
+# 监控任务运行时快照（每只标的上次分型状态，不纳入版本控制）
+state/*.json
 
 # 通达信最优服务器配置（运行时生成）
 best_server.json
