@@ -17,8 +17,8 @@ import requests
 
 
 class TushareClient:
-    # 关键：更换请求地址（不使用官方 api.tushare.pro，改用私有代理地址）
-    DEFAULT_API_URL = "https://ts-2.cwy666.com"
+    # 默认使用官方 Tushare Pro 地址；可通过 TUSHARE_API_URL 改用私有代理
+    DEFAULT_API_URL = "http://api.tushare.pro"
 
     def __init__(
         self,

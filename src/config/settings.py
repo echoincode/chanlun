@@ -26,6 +26,16 @@
 import os
 from datetime import datetime
 
+# 启动时从项目根目录的 .env 加载环境变量（容器/本地统一来源）。
+# 已存在于真实环境（如 docker-compose 注入）的变量不会被覆盖。
+try:
+    from dotenv import load_dotenv
+    # 优先项目根目录（Settings 被导入时 cwd 即项目根）；找不到则静默跳过
+    load_dotenv(override=False)
+except Exception:
+    # python-dotenv 未安装时不影响从真实环境变量读取
+    pass
+
 
 # ---------------------------------------------------------------------------
 # 页面配置（来源：app/config.py，原样）
@@ -113,8 +123,10 @@ CHART_HEIGHT = UI_CONFIG["chart_height"]      # 便捷别名（抽离清单要�
 # ---------------------------------------------------------------------------
 # Tushare 配置（来源：tushare_client.py 的非算法魔法数字）
 # ---------------------------------------------------------------------------
-TUSHARE_API_URL = "https://ts-2.cwy666.com"   # 私有代理地址（非官方 api.tushare.pro）
-TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")  # 环境变量，缺失为空，不回退硬编码
+TUSHARE_API_URL = os.environ.get(              # Tushare API 地址（默认官方，可改用私有代理）
+    "TUSHARE_API_URL", "http://api.tushare.pro"
+)
+TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")  # 环境变量（优先读 .env），缺失为空，不回退硬编码
 TUSHARE_TIMEOUT = 30                          # 请求超时(秒)
 TUSHARE_MAX_RETRIES = 3                       # 最大重试次数
 TUSHARE_RETRY_DELAY = 1.0                     # 重试基础退避(秒)

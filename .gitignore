@@ -17,3 +17,7 @@ __pycache__/
 
 # Git 自身元数据
 .git/
+
+# 环境变量（含敏感 Tushare token，禁止提交）
+.env
+.env.local

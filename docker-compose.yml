@@ -1,0 +1,38 @@
+services:
+  # Web 图形界面（推荐）
+  chanlun-web:
+    build: .
+    image: chanlun:latest
+    container_name: chanlun-web
+    ports:
+      - "8501:8501"
+    environment:
+      # 必填：Tushare API Token
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
+      # 可选：Tushare API 地址（默认官方 http://api.tushare.pro，可改用私有代理）
+      - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
+      - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+    volumes:
+      # 挂载结果输出目录，便于宿主机查看生成的 HTML 图表
+      - ./results:/app/results
+    command: ["streamlit", "run", "web/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    restart: unless-stopped
+
+  # CLI 命令行交互式入口（可选，按需启动）
+  chanlun-cli:
+    build: .
+    image: chanlun:latest
+    container_name: chanlun-cli
+    environment:
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
+      - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
+      - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+    volumes:
+      - ./results:/app/results
+    # 进入交互式 shell，由用户在容器内手动运行脚本
+    command: ["python", "scripts/run_tushare.py"]
+    stdin_open: true
+    tty: true
+    profiles:
+      - cli
+    restart: "no"
