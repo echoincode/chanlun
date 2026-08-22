@@ -7,6 +7,7 @@
   - 失败退避：累计错误次数后递增 sleep，增加爆破成本，保护后端数据源 IP 额度
     （Baostock 按出口 IP 限流，挡住未授权访问即避免额度被外部消耗）。
   - 登录态存于 st.session_state，Streamlit 通过 cookie 维持 session，可跨刷新保持。
+    注意：新开浏览器/新标签页需重新输入口令（简单方案，不做本地缓存）。
 
 可选：若不想把明文口令放 .env，可设置 APP_PASSWORD_HASH（hashlib.sha256(口令).hexdigest()），
 此时比对改为对输入做同样哈希后比较。
@@ -19,6 +20,8 @@ import os
 import time
 
 import streamlit as st
+
+from src.config import settings
 
 # 失败退避参数
 _MAX_FAILS_BEFORE_EXTRA_PENALTY = 3
@@ -65,6 +68,10 @@ def check_password() -> bool:
     返回 True 表示已通过认证（或已登录）；返回 False 表示仅渲染了登录框，
     调用方应直接 return，不执行后续业务逻辑（取数等）。
     """
+    # 开关关闭：直接放行（本地/内网部署可关闭登录）
+    if not settings.AUTH_ENABLED:
+        return True
+
     # 已登录
     if st.session_state.get("authenticated"):
         return True

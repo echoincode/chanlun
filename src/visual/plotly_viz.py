@@ -439,6 +439,140 @@ class PlotlyChanlunVisualizer:
             print("没有可显示的图表")
 
 
+def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_show=None):
+    """
+    绘制纯日线蜡烛图（原始K线，不含分型/笔标注），用于与主缠论图对照。
+
+    样式特性：
+    - A股配色：上涨红 #ef5350 / 下跌绿 #26a69a
+    - 2行1列子图：主区蜡烛图(0.82) + 成交量副图(0.18)，共享X轴
+    - 底部 rangeslider 时间窗拖拽 + rangeselector 快捷键(1M/3M/6M/1Y/ALL)
+    - hover 显示 开/高/低/收/涨跌幅
+
+    Args:
+        data: 含 datetime/open/high/low/close/volume 的 DataFrame
+        stock_code: 股票代码（标题展示）
+        return_fig: 是否返回 Figure 对象
+        bars_to_show: 显示最近 N 根（None 表示全部）
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    required_columns = ['datetime', 'open', 'high', 'low', 'close']
+    for col in required_columns:
+        if col not in data.columns:
+            raise ValueError(f"数据缺少必要列: {col}")
+
+    if not pd.api.types.is_datetime64_any_dtype(data['datetime']):
+        data['datetime'] = pd.to_datetime(data['datetime'])
+
+    plot_data = data.copy()
+    if bars_to_show is not None:
+        plot_data = plot_data.tail(bars_to_show)
+
+    if len(plot_data) == 0:
+        raise ValueError("没有可显示的K线数据")
+
+    # 涨跌幅
+    plot_data = plot_data.copy()
+    plot_data['pct'] = plot_data['close'].pct_change() * 100
+
+    yaxis_min = plot_data['low'].min() * 0.98
+    yaxis_max = plot_data['high'].max() * 1.02
+
+    code_suffix = f' - {stock_code}' if stock_code else ''
+    title = f'日线蜡烛图（原始K线）{code_suffix}'
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.82, 0.18],
+        subplot_titles=('', '成交量')
+    )
+
+    candle = go.Candlestick(
+        x=plot_data['datetime'],
+        open=plot_data['open'],
+        high=plot_data['high'],
+        low=plot_data['low'],
+        close=plot_data['close'],
+        name='K线',
+        increasing_line_color='#ef5350',
+        decreasing_line_color='#26a69a',
+        increasing_fillcolor='#ef5350',
+        decreasing_fillcolor='#26a69a',
+    )
+    fig.add_trace(candle, row=1, col=1)
+
+    vol_colors = ['#ef5350' if c >= o else '#26a69a'
+                  for c, o in zip(plot_data['close'], plot_data['open'])]
+    vol = go.Bar(
+        x=plot_data['datetime'],
+        y=plot_data['volume'],
+        name='成交量',
+        marker_color=vol_colors,
+        opacity=0.7,
+        hovertemplate='时间: %{x}<br>成交量: %{y}<extra></extra>'
+    )
+    fig.add_trace(vol, row=2, col=1)
+
+    fig.update_layout(
+        title=dict(text=title, x=0.5, font=dict(size=15)),
+        height=600,
+        showlegend=False,
+        margin=dict(t=40, b=30, l=50, r=30),
+        xaxis_rangeslider_visible=True,
+        xaxis=dict(
+            title='日期',
+            type='date',
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray',
+            rangeselector=dict(
+                buttons=list([
+                    dict(count=1, label='1M', step='month', stepmode='backward'),
+                    dict(count=3, label='3M', step='month', stepmode='backward'),
+                    dict(count=6, label='6M', step='month', stepmode='backward'),
+                    dict(count=1, label='1Y', step='year', stepmode='backward'),
+                    dict(step='all', label='ALL'),
+                ])
+            ),
+        ),
+        yaxis=dict(
+            title='价格',
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray',
+            zeroline=False,
+        ),
+        yaxis2=dict(
+            title='成交量',
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray',
+            zeroline=False,
+        ),
+        hovermode='x unified',
+    )
+
+    # 统一 hover：主图显示 OHLC + 涨跌幅
+    fig.update_traces(
+        hovertemplate=(
+            '时间: %{x}<br>'
+            '开: %{open:.2f}<br>高: %{high:.2f}<br>'
+            '低: %{low:.2f}<br>收: %{close:.2f}'
+            '<extra></extra>'
+        ),
+        selector=dict(type='candlestick'),
+    )
+
+    if return_fig:
+        return fig
+    else:
+        fig.show()
+        return fig
+
+
 def plotly_chanlun_visualization(data, start_idx=0, bars_to_show=100, data_type='daily', return_fig=False, stock_code=None):
     """
     基于Plotly的缠论K线可视化函数

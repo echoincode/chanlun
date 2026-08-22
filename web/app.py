@@ -30,7 +30,7 @@ from src.cli.runner import fetch_data, analyze
 from src.config import settings
 from src.utils.common import get_default_end_date, get_market_type, normalize_stock_code
 from src.utils.logger import get_logger
-from src.visual.plotly_viz import plotly_chanlun_visualization
+from src.visual.plotly_viz import plotly_chanlun_visualization, plotly_daily_candlestick
 from web.auth import check_password
 from web.styles import inject_styles
 
@@ -140,6 +140,15 @@ def main():
                     help="选择分钟K线的周期",
                 )
 
+        # 显示选项（v5：日线蜡烛图对照面板开关）
+        with st.container(border=True):
+            st.markdown("**📊 显示选项**")
+            show_raw_candle = st.checkbox(
+                "显示日线蜡烛图(原始)",
+                value=True,
+                help="在主图上方展示纯日线蜡烛图，用于与缠论分析图对照",
+            )
+
         # 分析按钮
         analyze_button = st.button("🚀 开始分析", use_container_width=True)
 
@@ -194,10 +203,36 @@ def main():
                     f"笔 {summary.get('segment_count', '?')} 个"
                 )
 
+                # 数据来源提示（本地缓存命中 / 远程查询 Baostock / Tushare）
+                _src = __import__("src.cli.runner", fromlist=["last_data_source"]).last_data_source
+                if _src == "local":
+                    st.info("📁 数据来源：本地缓存（未请求 Baostock）")
+                elif _src == "remote":
+                    st.info("🌐 数据来源：实时查询 Baostock")
+                elif _src == "tushare":
+                    st.info("🌐 数据来源：实时查询 Tushare")
+
                 # 生成图表
                 data_type_with_freq = (
                     data_type if data_type == "daily" else f"minute_{frequency}"
                 )
+
+                # v5：日线蜡烛图对照面板（仅日线 + 开关开启时展示）
+                if data_type == "daily" and show_raw_candle:
+                    st.markdown("### 📈 日线蜡烛图（原始K线）")
+                    candle_obj = plotly_daily_candlestick(
+                        result, stock_code=stock_code, return_fig=True
+                    )
+                    if candle_obj is not None:
+                        candle_html = candle_obj.to_html(
+                            include_plotlyjs="cdn", full_html=False
+                        )
+                        st.components.v1.html(
+                            candle_html, height=620, scrolling=True
+                        )
+                    else:
+                        st.warning("⚠️ 原始蜡烛图生成失败")
+
                 chart_obj = plotly_chanlun_visualization(
                     result,
                     start_idx=0,

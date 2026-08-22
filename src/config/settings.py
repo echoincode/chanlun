@@ -127,6 +127,11 @@ TUSHARE_API_URL = os.environ.get(              # Tushare API 地址（默认官�
     "TUSHARE_API_URL", "http://api.tushare.pro"
 )
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")  # 环境变量（优先读 .env），缺失为空，不回退硬编码
+
+# 登录口令开关：true 开启登录守卫；false 关闭（任何人均可直接访问，仅本地/内网使用）。
+# 取值不区分大小写，仅 "false"/"0"/"no"/"off" 视为关闭，其余一律视为开启。
+_AUTH_RAW = os.environ.get("AUTH_ENABLED", "true").strip().lower()
+AUTH_ENABLED = _AUTH_RAW not in ("false", "0", "no", "off")
 TUSHARE_TIMEOUT = 30                          # 请求超时(秒)
 TUSHARE_MAX_RETRIES = 3                       # 最大重试次数
 TUSHARE_RETRY_DELAY = 1.0                     # 重试基础退避(秒)

@@ -133,23 +133,20 @@ class ChanlunProcessor:
         根据已处理好的缠论K线的最后2根来判断方向
         
         规则：
-        - 如果只有0根或1根缠论K线，使用初始方向
+        - 如果只有0根或1根缠论K线，无法判定，返回 None（由调用方基于原始K线定方向）
         - 如果最后2根K线中，后一根K线高价更高，则方向向上
         - 如果最后2根K线中，后一根K线低价更低，则方向向下
-        - 否则保持方向不变
+        - 否则保持方向不变（基于已确认的 direction 字段）
         
         Args:
             chanlun_klines: 已处理的缠论K线列表
             
         Returns:
-            方向字符串: "up" 或 "down"
+            方向字符串: "up" 或 "down"；数据不足以判定时返回 None
         """
-        if len(chanlun_klines) == 0:
-            # 没有已处理的K线，使用初始方向
-            return getattr(self, 'initial_direction', 'up')
-        elif len(chanlun_klines) == 1:
-            # 只有1根K线，使用初始方向
-            return getattr(self, 'initial_direction', 'up')
+        if len(chanlun_klines) < 2:
+            # 数据不足，无法基于"已确认缠论K线的最后两根"判定，交由调用方处理
+            return None
         else:
             # 有2根或以上K线，比较最后2根
             last_kline = chanlun_klines[-1]
@@ -160,8 +157,25 @@ class ChanlunProcessor:
             elif last_kline['low'] < second_last_kline['low']:
                 return "down"
             else:
-                # 如果高价没有更高，低价也没有更低，保持当前方向
+                # 如果高价没有更高，低价也没有更低，保持已确认的方向
                 return chanlun_klines[-1].get('direction', 'up')
+
+    def _initial_direction_from_raw(self, df, start_idx):
+        """
+        基于原始K线前两根的真实高低关系确定初始方向（用于合并第一组K线时）。
+        不再盲目回退 initial_direction，避免与真实趋势相反。
+        """
+        if start_idx + 1 >= len(df):
+            # 不足两根，回退到 initial_direction
+            return getattr(self, 'initial_direction', 'up')
+        a = df.iloc[start_idx]
+        b = df.iloc[start_idx + 1]
+        if b['high'] > a['high']:
+            return "up"
+        elif b['low'] < a['low']:
+            return "down"
+        else:
+            return getattr(self, 'initial_direction', 'up')
     
     def merge_klines(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -225,7 +239,20 @@ class ChanlunProcessor:
                 
                 if has_inclusion:
                     # 有包含关系，判断方向
-                    current_direction = self.determine_direction(chanlun_klines)
+                    # Bug 2 修复：方向应基于"已确认的最后一根缠论K线"与"当前合并组最后一根"的先后关系，
+                    # 而非依赖 determine_direction 在合并组尚未入列时滞后返回。
+                    if chanlun_klines:
+                        ref = chanlun_klines[-1]
+                        cur = last_in_group
+                        if cur['high'] > ref['high'] or cur['low'] > ref['low']:
+                            current_direction = "up"
+                        elif cur['low'] < ref['low'] or cur['high'] < ref['high']:
+                            current_direction = "down"
+                        else:
+                            current_direction = ref.get('direction', 'up')
+                    else:
+                        # 第一组：用前两根原始K线真实关系定方向，避免盲目回退 initial_direction
+                        current_direction = self._initial_direction_from_raw(df, i)
                     
                     # 根据方向合并
                     if current_direction == "up":
@@ -263,6 +290,9 @@ class ChanlunProcessor:
                 
                 # 确定这根缠论K线的方向
                 direction = self.determine_direction(chanlun_klines)
+                if direction is None:
+                    # 第一组（chanlun_klines 为空）：用原始K线真实关系定方向
+                    direction = self._initial_direction_from_raw(df, i)
                 
                 # 计算整个合并组的成交量和成交额之和
                 total_volume = sum(kline.get('volume', 0) for kline in chanlun_group if pd.notna(kline.get('volume', 0)))
@@ -375,50 +405,30 @@ class ChanlunProcessor:
         # 识别分型
         fractals = []
         
-        # 处理第1根K线：根据初始方向标记分型
-        if len(klines) > 0 and self.initial_direction is not None:
-            first_idx = 0
-            if self.initial_direction == 'down':
-                # 初始方向向下，第1根K线标记为顶分型
-                fractals.append({
-                    'index': first_idx,
-                    'datetime': klines[first_idx]['datetime'],
-                    'type': 'top',
-                    'high': klines[first_idx]['high'],
-                    'low': klines[first_idx]['low']
-                })
-                print(f"  - 第1根K线({klines[first_idx]['datetime']})：初始方向向下，标记为顶分型")
-            elif self.initial_direction == 'up':
-                # 初始方向向上，第1根K线标记为底分型
-                fractals.append({
-                    'index': first_idx,
-                    'datetime': klines[first_idx]['datetime'],
-                    'type': 'bottom',
-                    'high': klines[first_idx]['high'],
-                    'low': klines[first_idx]['low']
-                })
-                print(f"  - 第1根K线({klines[first_idx]['datetime']})：初始方向向上，标记为底分型")
+        # Bug 1 修复：删除首根K线强制标记逻辑。
+        # 缠论分型必须由连续3根K线组成（中间K为最高/最低），第0根无左侧参考无法构成分型。
+        # 若确需"初始方向提示"，应作为独立字段（如 initial_direction_hint），不要写入 is_fractal/fractal_type。
         
-        # 处理后续K线：识别顶分型和底分型
-        for i in range(1, len(klines)):  # 从第2根K线开始
+        # 处理后续K线：识别顶分型和底分型（中间K线需有左右邻居，check_*_fractal 内部已做边界保护）
+        for i in range(1, len(klines) - 1):  # 仅对可作为"中间K线"的位置识别
             is_top = self.check_top_fractal(klines, i)
             is_bottom = self.check_bottom_fractal(klines, i)
             
             if is_top:
                 fractals.append({
                     'index': i,
-                    'datetime': klines[i]['datetime'],
+                    'datetime': result_df.loc[i]['datetime'],
                     'type': 'top',
-                    'high': klines[i]['high'],
-                    'low': klines[i]['low']
+                    'high': result_df.loc[i, 'high'],
+                    'low': result_df.loc[i, 'low']
                 })
             elif is_bottom:
                 fractals.append({
                     'index': i,
-                    'datetime': klines[i]['datetime'],
+                    'datetime': result_df.loc[i]['datetime'],
                     'type': 'bottom',
-                    'high': klines[i]['high'],
-                    'low': klines[i]['low']
+                    'high': result_df.loc[i, 'high'],
+                    'low': result_df.loc[i, 'low']
                 })
         
         # 标记分型
@@ -468,8 +478,8 @@ class ChanlunProcessor:
         print(f"开始根据{window*2+1}根K线窗口筛选分型...")
         
         result_df = df.copy()
-        klines = df.to_dict('records')
-        n = len(klines)
+        # 全局 P1 修复：不再构建 klines 副本，直接基于 result_df 读取 high/low，避免副本陈旧
+        n = len(result_df)
         
         removed_count = 0
         
@@ -486,13 +496,10 @@ class ChanlunProcessor:
             start_idx = max(0, i - window)
             end_idx = min(n - 1, i + window)
             
-            # 获取窗口内的所有K线
-            window_klines = klines[start_idx:end_idx + 1]
-            
             if fractal_type == 'top':
                 # 顶分型：检查当前K线的高价是否是窗口内最高的
-                current_high = klines[i]['high']
-                max_high_in_window = max(k['high'] for k in window_klines)
+                current_high = result_df.loc[i, 'high']
+                max_high_in_window = max(result_df.loc[j, 'high'] for j in range(start_idx, end_idx + 1))
                 
                 if current_high < max_high_in_window:
                     # 不是最高的，取消顶分型标记
@@ -502,8 +509,8 @@ class ChanlunProcessor:
                     
             elif fractal_type == 'bottom':
                 # 底分型：检查当前K线的低价是否是窗口内最低的
-                current_low = klines[i]['low']
-                min_low_in_window = min(k['low'] for k in window_klines)
+                current_low = result_df.loc[i, 'low']
+                min_low_in_window = min(result_df.loc[j, 'low'] for j in range(start_idx, end_idx + 1))
                 
                 if current_low > min_low_in_window:
                     # 不是最低的，取消底分型标记
@@ -546,8 +553,8 @@ class ChanlunProcessor:
         print("开始筛选连续同类型分型...")
         
         result_df = df.copy()
-        klines = df.to_dict('records')
-        n = len(klines)
+        # 全局 P1 修复：直接基于 result_df 读取，删除 klines 副本
+        n = len(result_df)
         
         removed_count = 0
         
@@ -587,8 +594,8 @@ class ChanlunProcessor:
                 max_high_idx = -1
                 
                 for idx in consecutive_group:
-                    if klines[idx]['high'] > max_high:
-                        max_high = klines[idx]['high']
+                    if result_df.loc[idx, 'high'] > max_high:
+                        max_high = result_df.loc[idx, 'high']
                         max_high_idx = idx
                 
                 # 取消其他顶分型标记
@@ -604,8 +611,8 @@ class ChanlunProcessor:
                 min_low_idx = -1
                 
                 for idx in consecutive_group:
-                    if klines[idx]['low'] < min_low:
-                        min_low = klines[idx]['low']
+                    if result_df.loc[idx, 'low'] < min_low:
+                        min_low = result_df.loc[idx, 'low']
                         min_low_idx = idx
                 
                 # 取消其他底分型标记
@@ -654,8 +661,8 @@ class ChanlunProcessor:
         print("开始验证分型之间的关系...")
         
         result_df = df.copy()
-        klines = df.to_dict('records')
-        n = len(klines)
+        # 全局 P1 修复：直接基于 result_df 读取，删除 klines 副本
+        n = len(result_df)
         
         # 获取所有分型的索引
         fractal_indices = []
@@ -700,17 +707,17 @@ class ChanlunProcessor:
             # 验证分型关系
             if current_fractal_type == 'bottom':
                 # 底分型：低点必须小于前一个顶分型的高点和后一个顶分型的高点
-                current_low = klines[current_idx]['low']
+                current_low = result_df.loc[current_idx, 'low']
                 valid = True
                 
                 if prev_opposite_idx is not None:
-                    prev_high = klines[prev_opposite_idx]['high']
+                    prev_high = result_df.loc[prev_opposite_idx, 'high']
                     if current_low >= prev_high:
                         valid = False
                         print(f"  - 底分型{current_idx}低点{current_low:.2f}不小于前一个顶分型{prev_opposite_idx}高点{prev_high:.2f}")
                 
                 if valid and next_opposite_idx is not None:
-                    next_high = klines[next_opposite_idx]['high']
+                    next_high = result_df.loc[next_opposite_idx, 'high']
                     if current_low >= next_high:
                         valid = False
                         print(f"  - 底分型{current_idx}低点{current_low:.2f}不小于后一个顶分型{next_opposite_idx}高点{next_high:.2f}")
@@ -722,17 +729,17 @@ class ChanlunProcessor:
                     
             elif current_fractal_type == 'top':
                 # 顶分型：高点必须大于前一个底分型的低点和后一个底分型的低点
-                current_high = klines[current_idx]['high']
+                current_high = result_df.loc[current_idx, 'high']
                 valid = True
                 
                 if prev_opposite_idx is not None:
-                    prev_low = klines[prev_opposite_idx]['low']
+                    prev_low = result_df.loc[prev_opposite_idx, 'low']
                     if current_high <= prev_low:
                         valid = False
                         print(f"  - 顶分型{current_idx}高点{current_high:.2f}不大于前一个底分型{prev_opposite_idx}低点{prev_low:.2f}")
                 
                 if valid and next_opposite_idx is not None:
-                    next_low = klines[next_opposite_idx]['low']
+                    next_low = result_df.loc[next_opposite_idx, 'low']
                     if current_high <= next_low:
                         valid = False
                         print(f"  - 顶分型{current_idx}高点{current_high:.2f}不大于后一个底分型{next_opposite_idx}低点{next_low:.2f}")
@@ -792,8 +799,8 @@ class ChanlunProcessor:
         print(f"开始筛选间隔小于{min_gap}的接近分型...")
         
         result_df = df.copy()
-        klines = df.to_dict('records')
-        n = len(klines)
+        # 全局 P1 修复：直接基于 result_df 读取，删除 klines 副本
+        n = len(result_df)
         
         # 获取所有分型的索引和类型
         fractal_indices = []
@@ -811,6 +818,11 @@ class ChanlunProcessor:
         removed_count = 0
         processed_pairs = set()  # 避免重复处理同一对分型
         
+        # Bug 4 修复：fractal_indices 为构建时快照，循环内取消分型后快照 type 不更新。
+        # 用实时读取闭包，确保查找相邻分型时跳过已被取消的分型。
+        def real_type(idx):
+            return result_df.loc[idx, 'fractal_type'] if result_df.loc[idx, 'is_fractal'] else None
+        
         # 遍历所有相邻的分型对
         for i in range(len(fractal_indices) - 1):
             current = fractal_indices[i]
@@ -821,6 +833,10 @@ class ChanlunProcessor:
             if pair_key in processed_pairs:
                 continue
             
+            # Bug 4 修复：实时校验当前对是否仍有效（前面循环可能已取消）
+            if not result_df.loc[current['index'], 'is_fractal'] or not result_df.loc[next_fractal['index'], 'is_fractal']:
+                continue
+            
             # 检查索引间隔
             index_gap = next_fractal['index'] - current['index']
             if index_gap >= min_gap:
@@ -829,21 +845,21 @@ class ChanlunProcessor:
             processed_pairs.add(pair_key)
             
             # 情况1：顶分型→底分型
-            if current['type'] == 'top' and next_fractal['type'] == 'bottom':
+            if real_type(current['index']) == 'top' and real_type(next_fractal['index']) == 'bottom':
                 An_idx = current['index']
                 Bn_idx = next_fractal['index']
                 
                 # 找到Bn后面的顶分型An+1
                 An1_idx = None
                 for j in range(i + 2, len(fractal_indices)):
-                    if fractal_indices[j]['type'] == 'top':
+                    if real_type(fractal_indices[j]['index']) == 'top':
                         An1_idx = fractal_indices[j]['index']
                         break
                 
                 if An1_idx is not None:
                     # 比较An和An+1的高价
-                    An_high = klines[An_idx]['high']
-                    An1_high = klines[An1_idx]['high']
+                    An_high = result_df.loc[An_idx, 'high']
+                    An1_high = result_df.loc[An1_idx, 'high']
                     
                     if An1_high > An_high:
                         # 保留An+1，取消An
@@ -855,14 +871,14 @@ class ChanlunProcessor:
                         # 找到An前面的底分型Bn-1
                         Bn1_idx = None
                         for j in range(i - 1, -1, -1):
-                            if fractal_indices[j]['type'] == 'bottom':
+                            if real_type(fractal_indices[j]['index']) == 'bottom':
                                 Bn1_idx = fractal_indices[j]['index']
                                 break
                         
                         if Bn1_idx is not None:
                             # 比较Bn-1和Bn的低价
-                            Bn1_low = klines[Bn1_idx]['low']
-                            Bn_low = klines[Bn_idx]['low']
+                            Bn1_low = result_df.loc[Bn1_idx, 'low']
+                            Bn_low = result_df.loc[Bn_idx, 'low']
                             
                             if Bn_low < Bn1_low:
                                 # 保留Bn，取消Bn-1
@@ -886,14 +902,14 @@ class ChanlunProcessor:
                         # 找到An+1后面的底分型Bn+1
                         Bn1_idx = None
                         for j in range(i + 3, len(fractal_indices)):  # 跳过An和Bn
-                            if fractal_indices[j]['type'] == 'bottom':
+                            if real_type(fractal_indices[j]['index']) == 'bottom':
                                 Bn1_idx = fractal_indices[j]['index']
                                 break
                         
                         if Bn1_idx is not None:
                             # 比较Bn+1和Bn的低价
-                            Bn1_low = klines[Bn1_idx]['low']
-                            Bn_low = klines[Bn_idx]['low']
+                            Bn1_low = result_df.loc[Bn1_idx, 'low']
+                            Bn_low = result_df.loc[Bn_idx, 'low']
                             
                             if Bn_low < Bn1_low:
                                 # 保留Bn，取消Bn+1
@@ -909,21 +925,21 @@ class ChanlunProcessor:
                                 print(f"  - 底分型{Bn_idx}低价{Bn_low:.2f}不低于后续底分型{Bn1_idx}低价{Bn1_low:.2f}，取消{Bn_idx}")
             
             # 情况2：底分型→顶分型
-            elif current['type'] == 'bottom' and next_fractal['type'] == 'top':
+            elif real_type(current['index']) == 'bottom' and real_type(next_fractal['index']) == 'top':
                 An_idx = current['index']
                 Bn_idx = next_fractal['index']
                 
                 # 找到Bn后面的底分型An+1
                 An1_idx = None
                 for j in range(i + 2, len(fractal_indices)):
-                    if fractal_indices[j]['type'] == 'bottom':
+                    if real_type(fractal_indices[j]['index']) == 'bottom':
                         An1_idx = fractal_indices[j]['index']
                         break
                 
                 if An1_idx is not None:
                     # 比较An和An+1的低价
-                    An_low = klines[An_idx]['low']
-                    An1_low = klines[An1_idx]['low']
+                    An_low = result_df.loc[An_idx, 'low']
+                    An1_low = result_df.loc[An1_idx, 'low']
                     
                     if An1_low < An_low:
                         # 保留An+1，取消An
@@ -935,14 +951,14 @@ class ChanlunProcessor:
                         # 找到An前面的顶分型Bn-1
                         Bn1_idx = None
                         for j in range(i - 1, -1, -1):
-                            if fractal_indices[j]['type'] == 'top':
+                            if real_type(fractal_indices[j]['index']) == 'top':
                                 Bn1_idx = fractal_indices[j]['index']
                                 break
                         
                         if Bn1_idx is not None:
                             # 比较Bn-1和Bn的高价
-                            Bn1_high = klines[Bn1_idx]['high']
-                            Bn_high = klines[Bn_idx]['high']
+                            Bn1_high = result_df.loc[Bn1_idx, 'high']
+                            Bn_high = result_df.loc[Bn_idx, 'high']
                             
                             if Bn_high > Bn1_high:
                                 # 保留Bn，取消Bn-1
@@ -966,14 +982,14 @@ class ChanlunProcessor:
                         # 找到An+1后面的顶分型Bn+1
                         Bn1_idx = None
                         for j in range(i + 3, len(fractal_indices)):  # 跳过An和Bn
-                            if fractal_indices[j]['type'] == 'top':
+                            if real_type(fractal_indices[j]['index']) == 'top':
                                 Bn1_idx = fractal_indices[j]['index']
                                 break
                         
                         if Bn1_idx is not None:
                             # 比较Bn+1和Bn的高价
-                            Bn1_high = klines[Bn1_idx]['high']
-                            Bn_high = klines[Bn_idx]['high']
+                            Bn1_high = result_df.loc[Bn1_idx, 'high']
+                            Bn_high = result_df.loc[Bn_idx, 'high']
                             
                             if Bn_high > Bn1_high:
                                 # 保留Bn，取消Bn+1
@@ -1053,7 +1069,17 @@ class ChanlunProcessor:
         relationship_filtered_bottom_count = len(relationship_filtered_fractals[relationship_filtered_fractals['fractal_type'] == 'bottom'])
 
         # 第七步：筛选接近分型（第九步）
+        # Bug 3/4 修复：单次 filter_close 后取消的分型可能改变相邻关系，需迭代至稳定。
+        # 在原有两轮（第六/七/八/九步）基础上，继续循环 filter_close 直到分型数量不再变化。
         final_df = self.filter_close_fractals(relationship_filtered_df)
+        max_iterations = 20  # 防御性上限，防止异常死循环
+        for _ in range(max_iterations):
+            before_count = len(final_df[final_df['is_fractal']])
+            final_df = self.validate_fractal_relationships(final_df)
+            final_df = self.filter_close_fractals(final_df)
+            after_count = len(final_df[final_df['is_fractal']])
+            if after_count == before_count:
+                break
 
         # 保存最终统计
         final_fractals = final_df[final_df['is_fractal']]
@@ -1147,10 +1173,10 @@ class ChanlunProcessor:
             if result_df.loc[i, 'is_fractal'] and result_df.loc[i, 'fractal_type'] is not None:
                 fractals.append({
                     'index': i,
-                    'datetime': klines[i]['datetime'],
+                    'datetime': result_df.loc[i]['datetime'],
                     'type': result_df.loc[i, 'fractal_type'],
-                    'high': klines[i]['high'],
-                    'low': klines[i]['low']
+                    'high': result_df.loc[i, 'high'],
+                    'low': result_df.loc[i, 'low']
                 })
         
         if len(fractals) < 2:

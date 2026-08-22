@@ -18,11 +18,17 @@
 """
 from __future__ import annotations
 
+import sys
+
 import pandas as pd
 
 from src.core.chanlun_processor import ChanlunProcessor
 from src.data.tushare_fetcher import TushareClient
 from src.utils.common import get_market_type
+
+# 最近一次取数来源标记（"local" 本地缓存 / "remote" 查询 Baostock / "tushare" 查询 Tushare），
+# 供 web 侧提示用户数据来源。
+last_data_source: str | None = None
 
 
 def fetch_data(
@@ -55,7 +61,11 @@ def fetch_data(
         标准 8 列 DataFrame：datetime,open,high,low,close,volume,amount,code
     """
     if data_source == "baostock":
-        return _fetch_from_baostock(code, start_date, end_date, data_type, frequency)
+        df = _fetch_from_baostock(code, start_date, end_date, data_type, frequency)
+        from src.data import kline_cache
+
+        globals()["last_data_source"] = kline_cache.last_source or "remote"
+        return df
 
     # 默认 tushare 源
     if data_type != "daily":
@@ -72,6 +82,7 @@ def fetch_data(
         print("✗ 错误：未配置 TUSHARE_TOKEN，无法获取行情数据")
         print("  请在 .env 中设置 TUSHARE_TOKEN=你的token，或切换数据源为 Baostock")
         sys.exit(2)
+    globals()["last_data_source"] = "tushare"
     return client.fetch_daily_data(code, start_date, end_date, market_type)
 
 
@@ -82,16 +93,23 @@ def _fetch_from_baostock(
     data_type: str,
     frequency: str,
 ) -> pd.DataFrame:
-    """从 Baostock 数据源取数（免费、免 token，支持 A股/ETF/指数日线与分钟线）。"""
+    """从 Baostock 数据源取数（免费、免 token，支持 A股/ETF/指数日线与分钟线）。
+
+    已接入本地 CSV 缓存（src.data.kline_cache）：按标的代码存盘，请求区间被缓存覆盖
+    时直接读盘，不再查询 Baostock；否则补齐缺失段后写回。
+    """
     from src.data.baostock_fetcher import BaostockClient
+    from src.data import kline_cache
 
     bs_freq = "d" if data_type == "daily" else str(frequency)
     try:
         client = BaostockClient()
-        return client.fetch_daily_data(
+        return kline_cache.load_or_fetch(
             code,
             start_date,
             end_date,
+            client,
+            data_type=data_type,
             frequency=bs_freq,
             adjustflag="2",
         )
