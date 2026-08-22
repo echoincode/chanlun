@@ -4,11 +4,9 @@
   1. 继承 BaseFetcher，实现 fetch_daily_data 统一接口（返回标准 8 列 DataFrame）；
   2. token/api_url/timeout 等默认值改从 src.config.settings 读取，删除原硬编码 token；
   3. 吸收 gen_golden_samples.py 的 _tushare_to_standard 列映射逻辑为 _to_standard_dataframe；
-  4. 原有 query/daily/index_daily/fund_daily/pro_bar/trade_cal 方法体**完全不动**；
+  4. 取数统一走通用行情接口 pro_bar（日/周/月/分钟、支持复权），不再分派
+     daily/fund_daily/index_daily 等子接口；
   5. _demo() 冒烟测试 print 保留原样，token 改读环境变量。
-
-原有取数逻辑（三接口分派 daily/fund_daily/index_daily、token 鉴权、retry、限流）
-完全不动。新增的 fetch_daily_data 是高层封装，不改动底层取数方法。
 """
 from __future__ import annotations
 
@@ -29,7 +27,7 @@ from src.config.settings import (
 from src.data.base_fetcher import BaseFetcher
 
 
-# 市场类型 → Tushare 接口名分派
+# 市场类型 → Tushare 标准 HTTP 接口名分派（走私有代理，需代理支持对应接口）
 _MARKET_API_MAP = {
     "stock": "daily",
     "etf": "fund_daily",
@@ -92,10 +90,13 @@ class TushareClient(BaseFetcher):
         fields: str | Iterable[str] = "",
         **params: Any,
     ) -> list[dict[str, Any]]:
-        """调用任意 Tushare 接口，返回以字段名为 key 的字典列表。
+        """调用任意 Tushare 标准 HTTP 接口，返回以字段名为 key 的字典列表。
+
+        注意：通用行情接口 pro_bar 是 SDK 集成接口，暂不支持 HTTP 直接调用，
+        请使用 pro_bar() 方法（走官方 tushare SDK）。
 
         Args:
-            api_name: 接口名，如 "trade_cal"、"daily"、"pro_bar" 等。
+            api_name: 标准接口名，如 "daily"、"index_daily"、"fund_daily"、"trade_cal" 等。
             fields:   需要的字段，可传字符串 "ts_code,close" 或列表。
             **params: 接口参数，如 exchange="SSE", start_date="20240101"。
         """
@@ -138,21 +139,9 @@ class TushareClient(BaseFetcher):
         # 理论不可达
         raise RuntimeError(f"[{api_name}] 未知错误: {last_err}")
 
-    # ---- 下面是几个常用接口的便捷封装，便于测试 ----
-
-    def trade_cal(
-        self,
-        exchange: str = "SSE",
-        start_date: str = "20240101",
-        end_date: str = "20240110",
-    ) -> list[dict[str, Any]]:
-        """交易日历。"""
-        return self.query(
-            "trade_cal",
-            exchange=exchange,
-            start_date=start_date,
-            end_date=end_date,
-        )
+    # ---- 标准 HTTP 接口（走私有代理 TUSHARE_API_URL）----
+    # 注意：私有代理未提供 pro_bar 集成接口（调之返回 code=40101），
+    # 故日线取数按市场类型分派到下列标准接口。
 
     def daily(
         self,
@@ -160,36 +149,13 @@ class TushareClient(BaseFetcher):
         start_date: str = "20240101",
         end_date: str = "20240110",
     ) -> list[dict[str, Any]]:
-        """日线行情。"""
+        """股票日线行情。"""
         return self.query(
             "daily",
             fields="ts_code,trade_date,open,high,low,close,vol,amount",
             ts_code=ts_code,
             start_date=start_date,
             end_date=end_date,
-        )
-
-    def pro_bar(
-        self,
-        ts_code: str = "000001.SZ",
-        start_date: str = "20240101",
-        end_date: str = "20240110",
-        freq: str = "D",
-        asset: str = "E",
-        adj: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """通用行情接口（日/周/月/分钟），支持复权。
-
-        adj: None 未复权 / "qfq" 前复权 / "hfq" 后复权（仅 asset='E' 股票支持）。
-        """
-        return self.query(
-            "pro_bar",
-            ts_code=ts_code,
-            start_date=start_date,
-            end_date=end_date,
-            freq=freq,
-            asset=asset,
-            adj=adj,
         )
 
     def index_daily(
@@ -222,7 +188,80 @@ class TushareClient(BaseFetcher):
             end_date=end_date,
         )
 
-    # ---- BaseFetcher 统一接口实现（新增，不改动原有取数方法） ----
+    def pro_bar(
+        self,
+        ts_code: str = "000001.SZ",
+        start_date: str = "20240101",
+        end_date: str = "20240110",
+        freq: str = "D",
+        asset: str = "E",
+        adj: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """通用行情接口（日/周/月/分钟），支持复权。
+
+        adj: None 未复权 / "qfq" 前复权 / "hfq" 后复权（仅 asset='E' 股票支持）。
+
+        注意：本项目 Tushare 取数统一走私有代理 TUSHARE_API_URL（默认
+        https://ts-2.cwy666.com），该代理支持 pro_bar 的 HTTP 调用，因此
+        pro_bar 也走 self.query() 的 HTTP 路径（而非官方 tushare SDK 的
+        ts.pro_bar()——官方 SDK 硬编码官方域名，无法使用私有代理与代理 token）。
+        """
+        return self.query(
+            "pro_bar",
+            ts_code=ts_code,
+            start_date=start_date,
+            end_date=end_date,
+            freq=freq,
+            asset=asset,
+            adj=adj,
+        )
+
+    # ---- BaseFetcher 统一接口实现 ----
+
+    def _fetch_adj_factors(
+        self, code: str, start: str, end: str
+    ) -> dict[str, float]:
+        """取股票复权因子，返回 {trade_date(YYYYMMDD): adj_factor}。
+
+        走 adj_factor 标准接口（私有代理已验证支持）。仅股票有复权因子，
+        ETF/指数无此接口，调用方需自行避免对非股票调用。
+        """
+        rows = self.query(
+            "adj_factor",
+            fields="ts_code,trade_date,adj_factor",
+            ts_code=code,
+            start_date=start,
+            end_date=end,
+        )
+        return {r["trade_date"]: float(r["adj_factor"]) for r in rows}
+
+    @staticmethod
+    def _apply_qfq(
+        rows: list[dict[str, Any]], factors: dict[str, float]
+    ) -> list[dict[str, Any]]:
+        """对未复权日线做前复权（qfq）。
+
+        前复权公式：price_qfq = price × (当日 adj_factor / 基准日 adj_factor)
+        基准日取区间内最新一日（使最新价保持不变）。仅对 open/high/low/close
+        四个价格应用；vol/amount 不复权，保持原值。
+        """
+        if not factors:
+            return rows
+        base_factor = max(factors.values())  # 最新一日 factor 最大
+        out = []
+        for r in rows:
+            td = r.get("trade_date")
+            f = factors.get(td)
+            if f is None or f == 0:
+                out.append(r)
+                continue
+            ratio = f / base_factor
+            new = dict(r)
+            for p in ("open", "high", "low", "close"):
+                if p in new and new[p] is not None:
+                    new[p] = round(float(new[p]) * ratio, 4)
+            out.append(new)
+        return out
 
     def fetch_daily_data(
         self,
@@ -234,13 +273,17 @@ class TushareClient(BaseFetcher):
     ) -> pd.DataFrame:
         """BaseFetcher 统一接口：获取日线数据，返回标准 8 列 DataFrame。
 
-        统一走 pro_bar 通用行情接口，并默认前复权（adj="qfq"），
-        与 Baostock 默认前复权（adjustflag="2"）口径对齐，消除展示不一致。
+        按市场类型分派到 Tushare 标准 HTTP 接口（走私有代理）：
+          stock → daily / etf → fund_daily / index → index_daily。
+        注：私有代理未提供 pro_bar 集成接口（调之返回 code=40101），故不使用 pro_bar。
 
-        注意：
-          - adj=None 未复权 / "qfq" 前复权 / "hfq" 后复权（仅股票支持）
-          - 指数/基金（asset 非 'E'）pro_bar 不支持 adj，自动降级为 None
-          - hk：tushare 港股需单独权限，直接报错
+        复权处理：
+          - stock + adj="qfq"：取 daily（未复权）并叠加 adj_factor 计算前复权，
+            与 Baostock 默认前复权（adjustflag="2"）口径对齐；
+          - etf / index 无复权因子接口，仅返回未复权 daily；
+          - adj=None 或 "hfq"：当前仅返回未复权（hfq 需后复权因子，暂未实现）。
+
+        hk：tushare 港股需单独权限，直接报错。
 
         列映射（吸收自 gen_golden_samples.py 的 _tushare_to_standard）：
           trade_date → datetime (YYYYMMDD → YYYY-MM-DD)
@@ -252,37 +295,20 @@ class TushareClient(BaseFetcher):
             raise ValueError(
                 "Tushare 不支持港股（需单独权限），请使用 A股/ETF/指数"
             )
-        # asset 映射：stock→E, etf→FD, index→I
-        asset = {"stock": "E", "etf": "FD", "index": "I"}.get(market_type, "E")
-        # qfq/hfq 仅股票支持，指数/基金强制不复权
-        if asset != "E":
-            adj = None
+        api = _MARKET_API_MAP.get(market_type, "daily")
         start = start_date.replace("-", "")
         end = end_date.replace("-", "")
-        try:
-            rows = self.pro_bar(
-                ts_code=code,
-                start_date=start,
-                end_date=end,
-                freq="D",
-                asset=asset,
-                adj=adj,
-            )
-        except RuntimeError as e:
-            # pro_bar 需要积分权限（40101 接口未授权）。权限不足时优雅降级到
-            # 原 daily/fund_daily/index_daily（不复权），保证功能不中断；
-            # 此时无法与 Baostock 前复权对齐，仅在有 pro_bar 权限时生效。
-            if "40101" in str(e):
-                api = _MARKET_API_MAP.get(market_type, "daily")
-                rows = self.query(
-                    api,
-                    fields="ts_code,trade_date,open,high,low,close,vol,amount",
-                    ts_code=code,
-                    start_date=start,
-                    end_date=end,
-                )
-            else:
-                raise
+        rows = self.query(
+            api,
+            fields="ts_code,trade_date,open,high,low,close,vol,amount",
+            ts_code=code,
+            start_date=start,
+            end_date=end,
+        )
+        # 股票前复权：叠加 adj_factor
+        if market_type == "stock" and adj == "qfq":
+            factors = self._fetch_adj_factors(code, start, end)
+            rows = self._apply_qfq(rows, factors)
         return self._to_standard_dataframe(rows, code)
 
     @staticmethod
@@ -302,6 +328,9 @@ class TushareClient(BaseFetcher):
         df["code"] = code
         for col in ["open", "high", "low", "close", "volume", "amount"]:
             df[col] = df[col].astype(float)
+        # Tushare 接口默认按交易日倒序返回，转标准升序，
+        # 否则下游 process_klines 的 iloc 位置切片会切反。
+        df = df.sort_values("datetime").reset_index(drop=True)
         return df[["datetime", "open", "high", "low", "close", "volume", "amount", "code"]]
 
 
@@ -313,12 +342,8 @@ def _demo() -> None:
         return
     client = TushareClient(token)
 
-    print("== trade_cal ==")
-    for row in client.trade_cal(start_date="20240108", end_date="20240110"):
-        print(row)
-
-    print("\n== daily (000001.SZ) ==")
-    for row in client.daily(ts_code="000001.SZ", start_date="20240108", end_date="20240110"):
+    print("== pro_bar (000001.SZ, qfq) ==")
+    for row in client.pro_bar(ts_code="000001.SZ", start_date="20240108", end_date="20240110"):
         print(row)
 
 
