@@ -24,12 +24,33 @@ __pycache__/
 # Git 自身元数据
 .git/
 
-# 环境变量（含敏感 Tushare token，禁止提交）
+# 环境变量（含敏感 Tushare token / webhook，禁止提交）
+# 通用忽略所有 .env 变体（保留 .env.example 作为模板提交）
 .env
-.env.local
+.env.*
+!.env.example
 
 # 运行时日志
 streamlit.log
 streamlit.err
 *.log
 *.err
+
+# ===== 敏感 / 私有文件兜底（禁止提交） =====
+# 含凭据的测试脚本（如 notify_test.py 含 webhook，不得入库）
+*_test.py
+tests/*_test.py
+
+# 私有部署配置、密钥文件
+*.key
+*.pem
+*.crt
+secrets.yaml
+secrets.yml
+config.local.*
+
+# 编辑器 / OS 元数据
+.vscode/
+.idea/
+.DS_Store
+
