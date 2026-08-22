@@ -79,11 +79,23 @@ def fetch_data(
 
     client = TushareClient()
     if not client.is_available():
-        print("✗ 错误：未配置 TUSHARE_TOKEN，无法获取行情数据")
-        print("  请在 .env 中设置 TUSHARE_TOKEN=你的token，或切换数据源为 Baostock")
-        sys.exit(2)
+        raise RuntimeError(
+            "未配置 TUSHARE_TOKEN，无法从 Tushare 获取行情数据；请配置 token 或切换数据源为 Baostock"
+        )
+    # 接入本地缓存：本地优先，区间缺失时才远程查询并写回
+    from src.data import kline_cache
+
+    df = kline_cache.load_or_fetch(
+        code,
+        start_date,
+        end_date,
+        client,
+        source="tushare",
+        market_type=market_type,
+        adj="qfq",
+    )
     globals()["last_data_source"] = "tushare"
-    return client.fetch_daily_data(code, start_date, end_date, market_type)
+    return df
 
 
 def _fetch_from_baostock(

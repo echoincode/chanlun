@@ -30,6 +30,9 @@ from src.data.kline_cache import load_or_fetch
 from src.cli.runner import analyze
 from src.notify import get_notifiers, Notifier
 from src.data.stock_names import get_stock_name
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 STATE_DIR = os.path.join(_PROJECT_ROOT, "state")
 
@@ -163,6 +166,7 @@ def run_monitor(force: bool = False) -> dict:
     """
     now = datetime.now()
     if not force and not _is_trading_day(now):
+        logger.info("[monitor] 跳过：非交易日（周末），date=%s", now.strftime("%Y-%m-%d"))
         return {
             "ran": False,
             "skipped_reason": "非交易日（周末），跳过",
@@ -186,6 +190,7 @@ def run_monitor(force: bool = False) -> dict:
             norm_codes.append(nc)
     codes = norm_codes
     if not codes:
+        logger.warning("[monitor] 跳过：未配置 MONITOR_CODES，无监控标的")
         return {
             "ran": False,
             "skipped_reason": "未配置 MONITOR_CODES，无监控标的",
@@ -197,6 +202,11 @@ def run_monitor(force: bool = False) -> dict:
 
     end_date = now.strftime("%Y-%m-%d")
     start_date = (now - timedelta(days=settings.NOTIFY_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+
+    logger.info(
+        "[monitor] 启动 | 标的=%d | 区间=%s~%s | 触发=%s",
+        len(codes), start_date, end_date, "手动" if force else "定时",
+    )
 
     fetcher = BaostockClient()
     cards: list[str] = []
@@ -211,10 +221,17 @@ def run_monitor(force: bool = False) -> dict:
                 data_type="daily", frequency="d", adjustflag="2",
             )
             if df is None or df.empty:
+                logger.warning("[monitor] %s 取数为空，跳过", code)
                 cards.append(f"### 📌 {code}\n> ⚠️ 取数为空，跳过")
                 continue
 
             _, summary = analyze(df)
+            logger.info(
+                "[monitor] %s | K线=%d | 分型=%d | 笔=%d",
+                code, len(df),
+                summary.get("fractal_count"),
+                summary.get("segment_count"),
+            )
             fractals = summary.get("fractals", [])
             picked = _pick_latest_fractal(fractals, end_date, settings.NOTIFY_LOOKBACK_DAYS)
             current_rec = _fractal_to_record(picked.get("latest"))
@@ -230,6 +247,10 @@ def run_monitor(force: bool = False) -> dict:
 
             if is_new:
                 new_count += 1
+                logger.info(
+                    "[monitor] %s 发现新分型 | 类型=%s | 日期=%s | 价格=%.2f",
+                    code, current_rec["type"], current_rec["datetime"], current_rec["price"],
+                )
                 card = _build_card(code, last_rec, current_rec)
                 # 更新快照（记录本次分型）
                 _save_state(code, {
@@ -259,11 +280,16 @@ def run_monitor(force: bool = False) -> dict:
 
         notifiers: list[Notifier] = get_notifiers()
         if notifiers:
+            logger.info(
+                "[monitor] 推送 | 渠道=%d | 扫描=%d | 新分型=%d",
+                len(notifiers), scanned, new_count,
+            )
             # full_msg 已含标题/日期/扫描摘要 + 模板B卡片，整段作为 content 推送；
             # title 仅作消息标题（飞书/企微可能展示为加粗前缀）
             for notifier in notifiers:
                 notifier.send("缠论收盘分型监控", full_msg)
         else:
+            logger.warning("[monitor] 未配置推送渠道，仅本地打印 | 扫描=%d | 新分型=%d", scanned, new_count)
             # 未配置渠道：本地打印，便于调试（Windows gbk 控制台需安全编码）
             _safe_print(full_msg)
 

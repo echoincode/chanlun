@@ -3,9 +3,9 @@
 迁移自 project_backup/app/main.py，改造点（对齐《分步执行清单》Step 5-2）：
   1. import 路径：引用 src/cli/runner、src/config/settings、src/utils/logger、
      src/utils/common、src/visual/plotly_viz、web/styles；
-  2. 数据源：默认使用 settings.DEFAULT_PARAMS["data_source"]（当前为 baostock）；
-     前端暂不开放数据源下拉框（后端 runner.fetch_data 的 data_source 接口仍保留，
-     待 Tushare pro_bar 权限就绪后可恢复 selectbox）；
+  2. 数据源：默认使用 settings.DEFAULT_PARAMS["data_source"]（当前为 baostock，
+     免费免 token 即可用）；前端开放数据源下拉框（baostock / tushare 可选），
+     Tushare 需配置 TUSHARE_TOKEN 后方可取数，缺失时仅在该源被选中时报错。
   3. 布局美化：标题+简介+固定免责提示栏；参数控件分组（标的组/周期组）；
      按钮整行宽度；结果区 st.success/warning/error；图表自适应宽度；
   4. 完整保留原 session_state 自动触发逻辑（切换到上次分析过的股票时自动重跑），
@@ -49,17 +49,67 @@ if not check_password():
     st.stop()
 
 
+def _boot_diagnostics():
+    """启动自检：在侧栏展示当前环境配置状态，明确 .env 是否已就绪。
+
+    仅渲染一次（session_state 去重）。不阻塞启动——baostock 免费默认可用，
+    Tushare 为可选增强，缺 token 时仅在该源被选中时才报错。
+    """
+    if st.session_state.get("_boot_diag_done"):
+        return
+    st.session_state._boot_diag_done = True
+
+    with st.sidebar:
+        st.caption("⚙️ 运行环境")
+        # 认证
+        if settings.AUTH_ENABLED:
+            st.success("🔐 登录守卫：已开启")
+        else:
+            st.warning("🔓 登录守卫：已关闭（仅限本地/内网）")
+        # 数据源就绪情况
+        ts_ok = bool(settings.TUSHARE_TOKEN)
+        st.markdown(
+            f"- 默认数据源：**{settings.DEFAULT_PARAMS['data_source']}**（免 token）"
+        )
+        if ts_ok:
+            st.success("🟢 Tushare：已配置 TUSHARE_TOKEN")
+        else:
+            st.info("⚪ Tushare：未配置 TUSHARE_TOKEN（选用该源时才会提示）")
+        logger.info(
+            "启动自检 | 认证=%s | Tushare=%s | 默认源=%s",
+            settings.AUTH_ENABLED,
+            "ready" if ts_ok else "no-token",
+            settings.DEFAULT_PARAMS["data_source"],
+        )
+
+
+_boot_diagnostics()
+
+
 @st.cache_data(ttl=settings.CACHE_TTL)
 def cached_analysis(stock_code, start_date, end_date, data_type, frequency, data_source):
     """缓存的分析函数（缓存保留在 web 侧，不迁移到 runner）。
 
     v5：数据源可切换 tushare / baostock，走 runner.fetch_data + runner.analyze。
+
+    返回 (result, summary, source_meta)：
+      source_meta 在函数体执行时捕获本次取数的真实来源（远程/本地命中），
+      随缓存一起返回，避免 @st.cache_data 命中时不执行函数体导致读到上一次
+      残留的全局变量（kline_cache.last_source / runner.last_data_source）。
     """
+    import src.cli.runner as _runner
+    from src.data import kline_cache as _kc
+
     df = fetch_data(
         stock_code, start_date, end_date, data_type=data_type,
         frequency=frequency, data_source=data_source,
     )
-    return analyze(df)
+    source_meta = {
+        "source": _runner.last_data_source,           # "baostock" / "tushare"
+        "cache_hit": _kc.last_source == "local",      # 命中本地缓存
+    }
+    result, summary = analyze(df)
+    return result, summary, source_meta
 
 
 def main():
@@ -168,7 +218,13 @@ def main():
             if pull_button:
                 with st.spinner("🔄 正在拉取全市场标的..."):
                     try:
+                        _t0 = datetime.now()
                         names = load_stock_names(force_refresh=True)
+                        _cost = (datetime.now() - _t0).total_seconds()
+                        logger.info(
+                            "拉取全量标的完成 | 数量=%d | 耗时=%.2fs | 写入=cache/stock_names.json",
+                            len(names), _cost,
+                        )
                         st.success(f"✅ 已拉取 {len(names)} 只标的并保存到本地")
                     except Exception as e:
                         logger.error("拉取标的失败: %s", e)
@@ -234,11 +290,13 @@ def main():
         # 显示加载状态
         with st.spinner(f"🔄 正在分析 {stock_code}..."):
             try:
+                _t0 = datetime.now()
                 logger.info(
-                    "开始分析 %s (%s ~ %s)", stock_code, start_date, end_date
+                    "开始分析 %s | 区间=%s~%s | 数据源=%s | 类型=%s",
+                    stock_code, start_date, end_date, data_source, data_type,
                 )
                 # 调用缓存的分析函数（web 侧缓存，含 fetch_data + analyze）
-                result, summary = cached_analysis(
+                result, summary, source_meta = cached_analysis(
                     stock_code,
                     start_date.strftime("%Y-%m-%d"),
                     end_date.strftime("%Y-%m-%d"),
@@ -246,9 +304,20 @@ def main():
                     frequency,
                     data_source,
                 )
+                _cost = (datetime.now() - _t0).total_seconds()
 
                 # 结果摘要
                 stock_name = get_stock_name(stock_code)
+                logger.info(
+                    "分析完成 %s | 来源=%s%s | 耗时=%.2fs | K线=%d | 分型=%s | 笔=%s",
+                    stock_code,
+                    source_meta.get("source"),
+                    "（本地缓存）" if source_meta.get("cache_hit") else "（远程）",
+                    _cost,
+                    len(result),
+                    summary.get("fractal_count"),
+                    summary.get("segment_count"),
+                )
                 st.success(
                     f"✅ 分析完成：{stock_name} · "
                     f"分型 {summary.get('fractal_count', '?')} 个 / "
@@ -256,13 +325,14 @@ def main():
                 )
 
                 # 数据来源提示（本地缓存命中 / 远程查询 Baostock / Tushare）
-                _src = __import__("src.cli.runner", fromlist=["last_data_source"]).last_data_source
-                if _src == "local":
-                    st.info("📁 数据来源：本地缓存（未请求 Baostock）")
-                elif _src == "remote":
-                    st.info("🌐 数据来源：实时查询 Baostock")
-                elif _src == "tushare":
-                    st.info("🌐 数据来源：实时查询 Tushare")
+                # source_meta 随缓存返回，缓存命中时也是本次分析的真实来源
+                _src = source_meta.get("source", "baostock")
+                _cache_hit = source_meta.get("cache_hit", False)
+                _label = "Tushare" if _src == "tushare" else "Baostock"
+                if _cache_hit:
+                    st.info(f"📁 数据来源：本地缓存（{_label}，未发起远程请求）")
+                else:
+                    st.info(f"🌐 数据来源：实时查询 {_label}")
 
                 # 生成图表
                 data_type_with_freq = (

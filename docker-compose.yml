@@ -7,14 +7,17 @@ services:
     ports:
       - "8501:8501"
     environment:
-      # 必填：Tushare API Token
+      # 可选：Tushare API Token。默认数据源为 baostock（免 token）即可用；
+      # 仅当选用 Tushare 数据源时才需要。留空则 Tushare 源不可取数。
       - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
       # 可选：Tushare API 地址（默认官方 http://api.tushare.pro，可改用私有代理）
       - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
       - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
-      # Web 登录口令（公网部署必填，未配置服务拒绝启动）
+      # 登录口令：AUTH_ENABLED=true 时必填，未配置服务拒绝启动（fail-fast）。
+      # 内网/本地部署可设 AUTH_ENABLED=false 关闭登录守卫。
       - APP_PASSWORD=${APP_PASSWORD:-}
       - APP_PASSWORD_HASH=${APP_PASSWORD_HASH:-}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
     volumes:
       # 挂载结果输出目录，便于宿主机查看生成的 HTML 图表
       - ./results:/app/results
@@ -30,6 +33,7 @@ services:
       - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
       - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
       - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
     volumes:
       - ./results:/app/results
     # 进入交互式 shell，由用户在容器内手动运行脚本

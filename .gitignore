@@ -4,11 +4,9 @@
 # 备份目录（冻结基准，不纳入版本控制）
 project_backup/
 
-# 运行时缓存与产物目录
+# 运行时缓存与产物目录（含所有行情 CSV / 名称映射，整体不入库）
 cache/
-!cache/
-!cache/*.csv
-!cache/stock_names.json
+**/cache/
 results/
 
 # 监控任务运行时快照（每只标的上次分型状态，不纳入版本控制）

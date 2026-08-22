@@ -322,7 +322,11 @@ class TushareClient(BaseFetcher):
         if df.empty:
             return df
         df = df.rename(columns={"trade_date": "datetime", "vol": "volume", "ts_code": "code"})
-        df["datetime"] = df["datetime"].astype(str).str.slice(0, 10)
+        # Tushare 返回 trade_date 为 YYYYMMDD，转为 YYYY-MM-DD 与 Baostock / 缓存层一致
+        df["datetime"] = (
+            df["datetime"].astype(str).str.slice(0, 8)
+            .str.replace(r"(\d{4})(\d{2})(\d{2})", r"\1-\2-\3", regex=True)
+        )
         df["volume"] = df["volume"].astype(float) * 100      # 手 → 股
         df["amount"] = df["amount"].astype(float) * 1000     # 千元 → 元
         df["code"] = code
