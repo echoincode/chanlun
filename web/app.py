@@ -31,6 +31,7 @@ from src.config import settings
 from src.utils.common import get_default_end_date, get_market_type, normalize_stock_code
 from src.utils.logger import get_logger
 from src.visual.plotly_viz import plotly_chanlun_visualization
+from web.auth import check_password
 from web.styles import inject_styles
 
 logger = get_logger(__name__)
@@ -40,6 +41,10 @@ st.set_page_config(**settings.PAGE_CONFIG)
 
 # 注入全局样式
 inject_styles()
+
+# 登录守卫：未通过认证只渲染登录框并 return，不触发任何数据获取
+if not check_password():
+    st.stop()
 
 
 @st.cache_data(ttl=settings.CACHE_TTL)

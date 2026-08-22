@@ -120,6 +120,29 @@ streamlit run web/app.py
 - 点击「🚀 开始分析」或直接修改代码自动触发
 - 右侧展示分析结果摘要和交互式图表
 
+#### 🔐 Web 登录口令（公网部署必填）
+
+为防止他人滥用你的数据源额度（Baostock 按出口 IP 限流、Tushare 按 token 限流），
+Web 入口内置轻量登录守卫：
+
+- 通过环境变量 `APP_PASSWORD` 配置口令（**未配置服务将拒绝启动**）；
+- 也可用 `APP_PASSWORD_HASH=sha256(口令)` 的十六进制小写替代明文；
+- 口令错误有失败退避（递增 sleep），抵御暴力破解；
+- 登录态保存在浏览器 session，刷新后保持。
+
+配置方式（`.env` 或 docker-compose 注入）：
+```bash
+# .env
+APP_PASSWORD=你的强口令
+# 或仅用哈希（更安全，避免明文落盘）
+APP_PASSWORD_HASH=$(python -c "import hashlib;print(hashlib.sha256('你的强口令'.encode()).hexdigest())")
+```
+
+Docker 启动：
+```bash
+docker compose up -d   # 自动从 .env 读取 APP_PASSWORD 注入容器
+```
+
 ### 4. 股票代码格式
 
 | 市场类型 | 代码格式 | 示例 |

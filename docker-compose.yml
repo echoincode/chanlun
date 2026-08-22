@@ -12,6 +12,9 @@ services:
       # 可选：Tushare API 地址（默认官方 http://api.tushare.pro，可改用私有代理）
       - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
       - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+      # Web 登录口令（公网部署必填，未配置服务拒绝启动）
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      - APP_PASSWORD_HASH=${APP_PASSWORD_HASH:-}
     volumes:
       # 挂载结果输出目录，便于宿主机查看生成的 HTML 图表
       - ./results:/app/results
