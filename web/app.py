@@ -148,6 +148,11 @@ def main():
                 value=True,
                 help="在主图上方展示纯日线蜡烛图，用于与缠论分析图对照",
             )
+            show_ma = st.checkbox(
+                "蜡烛图叠加均线 (MA5/10/20/30/60)",
+                value=True,
+                help="在原始蜡烛图上叠加 MA5/10/20/30/60 均线（基于区间收盘价）",
+            )
 
         # 分析按钮
         analyze_button = st.button("🚀 开始分析", use_container_width=True)
@@ -221,7 +226,7 @@ def main():
                 if data_type == "daily" and show_raw_candle:
                     st.markdown("### 📈 日线蜡烛图（原始K线）")
                     candle_obj = plotly_daily_candlestick(
-                        result, stock_code=stock_code, return_fig=True
+                        result, stock_code=stock_code, return_fig=True, show_ma=show_ma
                     )
                     if candle_obj is not None:
                         candle_html = candle_obj.to_html(

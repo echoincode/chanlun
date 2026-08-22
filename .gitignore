@@ -6,6 +6,8 @@ project_backup/
 
 # 运行时缓存与产物目录
 cache/
+!cache/
+!cache/*.csv
 results/
 
 # 通达信最优服务器配置（运行时生成）

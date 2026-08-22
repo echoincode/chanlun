@@ -80,13 +80,26 @@ class PlotlyChanlunVisualizer:
         
         # 根据数据类型设置X轴配置
         if data_type == 'daily':
+            # 类别轴：每个交易日为一个类别，周末/节假日不占位（无空白间隔）
+            x_labels = plot_data['datetime'].dt.strftime('%Y-%m-%d').tolist()
+            self._x_labels = x_labels
+            n = len(x_labels)
+            tick_step = max(1, n // 12)
+            tick_vals = x_labels[::tick_step]
+            if tick_vals and tick_vals[-1] != x_labels[-1]:
+                tick_vals = tick_vals + [x_labels[-1]]
             xaxis_config = dict(
                 title='日期',
-                type='date',
+                type='category',
                 showgrid=True,
                 gridwidth=1,
-                gridcolor='lightgray'
+                gridcolor='lightgray',
+                tickmode='array',
+                tickvals=tick_vals,
+                tickangle=-45,
             )
+            self._x_label_map = dict(zip(plot_data.index, x_labels))
+            self._x_tick_vals = tick_vals
             height = 900
         elif data_type.startswith('minute_'):
             freq = data_type.split('_')[1]
@@ -121,6 +134,7 @@ class PlotlyChanlunVisualizer:
                 tickvals=tick_positions,
                 ticktext=tick_labels
             )
+            self._x_label_map = None
             height = 900
         else:
             xaxis_config = dict(
@@ -130,6 +144,7 @@ class PlotlyChanlunVisualizer:
                 gridwidth=1,
                 gridcolor='lightgray'
             )
+            self._x_label_map = None
             height = 900
         
         # 创建子图 - 主体图占更大比例
@@ -162,9 +177,9 @@ class PlotlyChanlunVisualizer:
                 hoverinfo='text'
             )
         else:
-            # 日线使用datetime
+            # 日线使用字符串日期（类别轴，无空白）
             candlestick = go.Candlestick(
-                x=plot_data['datetime'],
+                x=x_labels,
                 open=plot_data['open'],
                 high=plot_data['high'],
                 low=plot_data['low'],
@@ -206,9 +221,9 @@ class PlotlyChanlunVisualizer:
                     hoverinfo='text'
                 )
             else:
-                # 日线使用datetime
+                # 日线使用字符串日期（类别轴，无空白）
                 volume = go.Bar(
-                    x=plot_data['datetime'],
+                    x=x_labels,
                     y=plot_data['volume'],
                     name='成交量',
                     marker_color=colors,
@@ -315,7 +330,21 @@ class PlotlyChanlunVisualizer:
                 ),
             ]
         )
-        
+
+        # 副图 x 轴与主图对齐（日线类别轴场景），确保量柱与 K 线像素级对齐
+        if getattr(self, '_x_label_map', None) is not None:
+            self.fig.update_xaxes(
+                row=2, col=1,
+                type='category',
+                tickmode='array',
+                tickvals=self._x_tick_vals,
+                tickangle=-45,
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='lightgray',
+                matches='x',
+            )
+
         return self.fig
     
     def _add_fractals(self, plot_data, data_type='daily'):
@@ -330,8 +359,8 @@ class PlotlyChanlunVisualizer:
                 x_pos = idx - plot_data.index[0]  # 转换为相对位置
                 hover_text = f"时间: {fractal['datetime']}<br>类型: {'顶分型' if fractal['fractal_type'] == 'top' else '底分型'}<br>价格: {price_value:.2f}"
             else:
-                # 日线使用datetime
-                x_pos = fractal['datetime']
+                # 日线使用字符串日期（类别轴，无空白）
+                x_pos = self._x_label_map[idx]
                 hover_text = f"时间: {fractal['datetime']}<br>类型: {'顶分型' if fractal['fractal_type'] == 'top' else '底分型'}<br>价格: {price_value:.2f}"
             
             if fractal['fractal_type'] == 'top':
@@ -396,7 +425,7 @@ class PlotlyChanlunVisualizer:
             if data_type.startswith('minute_'):
                 x_val = point.name - plot_data.index[0]
             else:
-                x_val = point['datetime']
+                x_val = self._x_label_map[point.name]
 
             all_x.append(x_val)
             all_y.append(y_val)
@@ -439,21 +468,23 @@ class PlotlyChanlunVisualizer:
             print("没有可显示的图表")
 
 
-def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_show=None):
+def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_show=None, show_ma=True):
     """
     绘制纯日线蜡烛图（原始K线，不含分型/笔标注），用于与主缠论图对照。
 
     样式特性：
     - A股配色：上涨红 #ef5350 / 下跌绿 #26a69a
     - 2行1列子图：主区蜡烛图(0.82) + 成交量副图(0.18)，共享X轴
-    - 底部 rangeslider 时间窗拖拽 + rangeselector 快捷键(1M/3M/6M/1Y/ALL)
-    - hover 显示 开/高/低/收/涨跌幅
+    - 类别X轴：每个交易日为一个类别，周末/节假日不占位（股票软件风格，无空白间隔）
+    - 主图可叠加 MA5/10/20/30/60 均线（基于区间收盘价滚动均值）
+    - hover 显示 开/高/低/收/涨跌幅 + 各均线值
 
     Args:
         data: 含 datetime/open/high/low/close/volume 的 DataFrame
         stock_code: 股票代码（标题展示）
         return_fig: 是否返回 Figure 对象
         bars_to_show: 显示最近 N 根（None 表示全部）
+        show_ma: 是否叠加 MA5/10/20/30/60 均线（默认 True）
     Returns:
         plotly.graph_objects.Figure
     """
@@ -476,6 +507,9 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
     plot_data = plot_data.copy()
     plot_data['pct'] = plot_data['close'].pct_change() * 100
 
+    # 类别轴：每个交易日作为一个类别，周末/节假日不占位（股票软件风格，无空白间隔）
+    x_labels = plot_data['datetime'].dt.strftime('%Y-%m-%d').tolist()
+
     yaxis_min = plot_data['low'].min() * 0.98
     yaxis_max = plot_data['high'].max() * 1.02
 
@@ -491,12 +525,13 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
     )
 
     candle = go.Candlestick(
-        x=plot_data['datetime'],
+        x=x_labels,
         open=plot_data['open'],
         high=plot_data['high'],
         low=plot_data['low'],
         close=plot_data['close'],
         name='K线',
+        customdata=plot_data['volume'],
         increasing_line_color='#ef5350',
         decreasing_line_color='#26a69a',
         increasing_fillcolor='#ef5350',
@@ -504,10 +539,31 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
     )
     fig.add_trace(candle, row=1, col=1)
 
+    # 主图叠加均线 MA5/10/20/30/60（基于区间收盘价滚动均值，前 N-1 根为 NaN 自动断线）
+    if show_ma:
+        _MA_CONFIG = [
+            (5, '#f5b041'),   # 黄
+            (10, '#9b59b6'),  # 紫
+            (20, '#2ecc71'),  # 绿
+            (30, '#3498db'),  # 蓝
+            (60, '#e74c3c'),  # 红
+        ]
+        for window, color in _MA_CONFIG:
+            ma_series = plot_data['close'].rolling(window).mean()
+            fig.add_trace(go.Scatter(
+                x=x_labels,
+                y=ma_series,
+                name=f'MA{window}',
+                mode='lines',
+                line=dict(color=color, width=1),
+                connectgaps=False,
+                hovertemplate=f'MA{window}: %{{y:.2f}}<extra></extra>',
+            ), row=1, col=1)
+
     vol_colors = ['#ef5350' if c >= o else '#26a69a'
                   for c, o in zip(plot_data['close'], plot_data['open'])]
     vol = go.Bar(
-        x=plot_data['datetime'],
+        x=x_labels,
         y=plot_data['volume'],
         name='成交量',
         marker_color=vol_colors,
@@ -516,27 +572,29 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
     )
     fig.add_trace(vol, row=2, col=1)
 
+    # 类别轴刻度：数据多时自动抽稀，避免标签重叠
+    n = len(x_labels)
+    tick_step = max(1, n // 12)
+    tick_vals = x_labels[::tick_step]
+    if tick_vals and tick_vals[-1] != x_labels[-1]:
+        tick_vals = tick_vals + [x_labels[-1]]
+
     fig.update_layout(
         title=dict(text=title, x=0.5, font=dict(size=15)),
         height=600,
-        showlegend=False,
-        margin=dict(t=40, b=30, l=50, r=30),
-        xaxis_rangeslider_visible=True,
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+        margin=dict(t=60, b=30, l=50, r=30),
+        xaxis_rangeslider_visible=False,
         xaxis=dict(
             title='日期',
-            type='date',
+            type='category',
             showgrid=True,
             gridwidth=1,
             gridcolor='lightgray',
-            rangeselector=dict(
-                buttons=list([
-                    dict(count=1, label='1M', step='month', stepmode='backward'),
-                    dict(count=3, label='3M', step='month', stepmode='backward'),
-                    dict(count=6, label='6M', step='month', stepmode='backward'),
-                    dict(count=1, label='1Y', step='year', stepmode='backward'),
-                    dict(step='all', label='ALL'),
-                ])
-            ),
+            tickmode='array',
+            tickvals=tick_vals,
+            tickangle=-45,
         ),
         yaxis=dict(
             title='价格',
@@ -555,12 +613,26 @@ def plotly_daily_candlestick(data, stock_code=None, return_fig=True, bars_to_sho
         hovermode='x unified',
     )
 
-    # 统一 hover：主图显示 OHLC + 涨跌幅
+    # 副图 x 轴显式声明与主图一致：类别类型 + 相同 tick + 绑定主图范围，确保量柱与 K 线像素级对齐
+    fig.update_xaxes(
+        row=2, col=1,
+        type='category',
+        tickmode='array',
+        tickvals=tick_vals,
+        tickangle=-45,
+        showgrid=True,
+        gridwidth=1,
+        gridcolor='lightgray',
+        matches='x',
+    )
+
+    # 统一 hover：主图悬浮窗显示 OHLC + 成交量（customdata 为当日成交量）
     fig.update_traces(
         hovertemplate=(
             '时间: %{x}<br>'
             '开: %{open:.2f}<br>高: %{high:.2f}<br>'
-            '低: %{low:.2f}<br>收: %{close:.2f}'
+            '低: %{low:.2f}<br>收: %{close:.2f}<br>'
+            '量: %{customdata:,.0f}'
             '<extra></extra>'
         ),
         selector=dict(type='candlestick'),
