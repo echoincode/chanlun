@@ -6,8 +6,7 @@ tests/golden_samples/*.csv，验证迁移后取数逻辑 + 列映射与黄金样
 运行方式（仓库根）：
   python tests/verify_tushare_fetcher.py
 
-token 优先读环境变量 TUSHARE_TOKEN，回退 demo token（与
-gen_golden_samples.py 一致，仅验证用）。
+token 仅读环境变量 TUSHARE_TOKEN（不内置任何硬编码 token，避免凭据泄露）。
 """
 import os
 import sys
@@ -53,8 +52,11 @@ GOLDEN_DIR = os.path.join(
 
 
 def main() -> int:
-    # token 优先环境变量，回退 demo token（与 gen_golden_samples.py 一致）
-    token = os.environ.get("TUSHARE_TOKEN") or "tsp_V3oG6xmzwoPGmfx4I4B1V63AMDqSIZfu3MpF2Gvd79s"
+    # token 仅从环境变量读取，禁止硬编码（避免凭据泄露进仓库）
+    token = os.environ.get("TUSHARE_TOKEN", "")
+    if not token:
+        print("✗ 未设置 TUSHARE_TOKEN 环境变量，无法运行验证；请先配置后再试。")
+        return 1
     client = TushareClient(token=token)
 
     all_ok = True
