@@ -346,12 +346,17 @@ def main():
                         result, stock_code=stock_code, return_fig=True, show_ma=show_ma
                     )
                     if candle_obj is not None:
+                        # 内联 Plotly.js（不依赖外网 CDN），消除图表加载空白
                         candle_html = candle_obj.to_html(
-                            include_plotlyjs="cdn", full_html=False
+                            include_plotlyjs=True, full_html=False
                         )
+                        # 渲染前占位提示，避免 iframe 上屏前的视觉空白
+                        _ph = st.empty()
+                        _ph.info("⏳ 正在渲染蜡烛图...")
                         st.components.v1.html(
                             candle_html, height=620, scrolling=True
                         )
+                        _ph.empty()
                     else:
                         st.warning("⚠️ 原始蜡烛图生成失败")
 
@@ -365,12 +370,17 @@ def main():
                 )
 
                 if chart_obj is not None:
+                    # 每个 st.components.v1.html 都是独立 iframe，无法复用另一张图的库，
+                    # 故各自内联 Plotly.js（去掉外网 CDN 依赖，消除加载空白/报错）
                     html_string = chart_obj.to_html(
-                        include_plotlyjs="cdn", full_html=False
+                        include_plotlyjs=True, full_html=False
                     )
+                    _ph2 = st.empty()
+                    _ph2.info("⏳ 正在渲染缠论分析图...")
                     st.components.v1.html(
                         html_string, height=settings.CHART_HEIGHT, scrolling=True
                     )
+                    _ph2.empty()
                 else:
                     st.error("❌ 图表生成失败!")
 

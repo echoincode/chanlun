@@ -8,12 +8,6 @@ ENV PYTHONUNBUFFERED=1 \
     TUSHARE_TOKEN="" \
     CHANLUN_LOG_LEVEL=INFO
 
-# 安装系统依赖（pytdx/mootdx 等可能需要的编译/网络库）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # 先复制依赖文件，利用 Docker 层缓存
