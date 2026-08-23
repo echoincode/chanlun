@@ -334,6 +334,15 @@ def main():
                 else:
                     st.info(f"🌐 数据来源：实时查询 {_label}")
 
+                # ETF 提示：Baostock 免费源对 ETF 不支持前复权，数据为未复权(除权)，
+                # 图上可能出现跳空缺口，缠论分型/笔识别需留意除权缺口干扰
+                if get_market_type(stock_code) == "etf":
+                    st.warning(
+                        "⚠️ 当前标的为 ETF：Baostock 数据源对 ETF 不提供前复权，"
+                        "展示数据为「未复权(除权)」行情，K 线可能含除权跳空缺口，"
+                        "分型/笔识别结果仅供参考，请勿将除权缺口误判为真实走势。"
+                    )
+
                 # 生成图表
                 data_type_with_freq = (
                     data_type if data_type == "daily" else f"minute_{frequency}"

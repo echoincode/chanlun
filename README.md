@@ -147,6 +147,26 @@ chanlun/
 
 项目提供 `start_web.bat`，自动读取 `.env` 的 `APP_PASSWORD`、检测端口占用并启动 Web。双击或命令行运行即可。
 
+**开机自启（Windows）**
+
+将本项目做成开机自动运行，本质是「开机后自动执行 `start_web.bat`」。`start_web.bat` 会在后台拉起 Streamlit，并在服务就绪后**弹出提示框**告知已启动及访问地址（http://localhost:8501），无需手动看日志。
+
+推荐两种挂载方式：
+
+- **启动文件夹（最简单，需用户登录后触发）**
+  1. `Win + R` → 输入 `shell:startup` → 回车，打开「启动」文件夹
+  2. 在文件夹内**新建快捷方式**，目标指向 `start_web.bat` 的完整路径（如 `E:\privateProject\chanlun\start_web.bat`）
+  3. 开机登录后即自动后台启动并弹窗提示
+
+- **任务计划程序（可「登录前」启动，推荐常驻机器）**
+  1. `taskschd.msc` → 创建基本任务
+  2. 触发器选「**计算机启动时**」
+  3. 操作选「启动程序」，程序填 `start_web.bat` 完整路径
+  4. 勾选「**不管用户是否登录都要运行**」+「使用最高权限」
+  5. ⚠️ 计划任务环境下 `PATH` 可能不含 `python`，建议把 `start_web.bat` 里的 `python` / `streamlit` 改为**绝对路径**（如 `C:\Users\你的用户名\AppData\Local\Programs\Python\Python311\python.exe`）；且「不管用户是否登录」模式下无桌面会话，**弹窗不可见**，此场景建议改用启动文件夹方案
+
+> 说明：Baostock 默认数据源免 Token，开机自启无需额外配置；若 `.env` 缺少 `APP_PASSWORD`，脚本会短暂提示后自动退出（不会 `pause` 卡住自启流程）。
+
 ### 方式三：Docker（推荐部署）
 
 ```bash
@@ -219,6 +239,11 @@ docker compose --profile cli up -d
 
 **Q4：切换数据源后结果不一致**
 两源复权口径一致（均按最新交易日基准前复权），差异主要来自停牌日处理（Tushare `daily` 不返回停牌日）。
+
+**Q5：开机自启后没看到「已启动」弹窗 / 服务没起来**
+- 若用任务计划程序且勾选了「不管用户是否登录都要运行」：**该模式无桌面会话，弹窗本就不可见**，属正常；服务仍会后台运行，直接访问 http://localhost:8501 即可。需要看弹窗请改用「启动文件夹」方案。
+- 检查 `python` / `streamlit` 是否在计划任务的 `PATH` 中，建议在 `start_web.bat` 内写为绝对路径。
+- 若 `.env` 缺少 `APP_PASSWORD` 且 `AUTH_ENABLED=true`，脚本会提示后退出（Web 不启动），请在 `.env` 配置口令或设 `AUTH_ENABLED=false`。
 
 ---
 

@@ -116,6 +116,7 @@ def _fetch_from_baostock(
     bs_freq = "d" if data_type == "daily" else str(frequency)
     try:
         client = BaostockClient()
+        # Baostock 不区分市场类型，ETF/股票/指数统一走 query_history_k_data_plus 区间查询（前复权）
         return kline_cache.load_or_fetch(
             code,
             start_date,

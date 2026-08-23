@@ -112,9 +112,7 @@ def load_or_fetch(
     # 无缓存：直接全量查询并保存
     if cached is None:
         globals()["last_source"] = "remote"
-        fresh = fetcher.fetch_daily_data(
-            code, start_date, end_date, **fetcher_kwargs
-        )
+        fresh = _call_fetcher(fetcher, code, start_date, end_date, fetcher_kwargs)
         if not fresh.empty:
             _save(code, fresh, source)
         return fresh
@@ -146,9 +144,7 @@ def load_or_fetch(
     for seg_start, seg_end in to_fetch:
         if seg_start > seg_end:
             continue
-        fresh = fetcher.fetch_daily_data(
-            code, seg_start, seg_end, **fetcher_kwargs
-        )
+        fresh = _call_fetcher(fetcher, code, seg_start, seg_end, fetcher_kwargs)
         if not fresh.empty:
             cached = pd.concat([cached, fresh], ignore_index=True)
 
@@ -157,6 +153,18 @@ def load_or_fetch(
 
     mask = (cached["datetime"] >= start_date) & (cached["datetime"] <= end_date)
     return cached[mask].reset_index(drop=True)
+
+
+def _call_fetcher(fetcher, code: str, start_date: str, end_date: str, kwargs: dict) -> "pd.DataFrame":
+    """统一调用真实取数后端。
+
+    兼容两种传法：
+      - fetcher 是实例（如 TushareClient / BaostockClient）→ 取其 fetch_daily_data 方法
+      - fetcher 是可调用（如 client.fetch_etf_daily_data 绑定方法）→ 直接调用
+    """
+    if callable(fetcher) and not hasattr(fetcher, "fetch_daily_data"):
+        return fetcher(code, start_date, end_date, **kwargs)
+    return fetcher.fetch_daily_data(code, start_date, end_date, **kwargs)
 
 
 def _prev_day(date_str: str) -> str:

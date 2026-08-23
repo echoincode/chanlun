@@ -32,7 +32,8 @@ IF EXIST "%ENV_FILE%" (
 IF "%APP_PASSWORD%"=="" (
     echo [警告] .env 中未找到 APP_PASSWORD，Web 将以无口令模式启动（WEB 入口会拒绝启动）。
     echo          请在 .env 中设置 APP_PASSWORD 后重试。
-    pause
+    echo [提示] 开机自启模式下不暂停，1 秒后自动退出。
+    timeout /t 1 >nul
     EXIT /B 1
 )
 
@@ -64,6 +65,28 @@ echo.
 
 SET "APP_PASSWORD=%APP_PASSWORD%"
 CD /D "%ROOT%"
-streamlit run web/app.py --server.address=0.0.0.0 --server.port=%PORT%
+
+REM ---- 后台拉起 Streamlit（不阻塞 bat，便于随后弹窗提示）----
+START "" /B streamlit run web/app.py --server.address=0.0.0.0 --server.port=%PORT%
+
+REM ---- 等待端口就绪后弹出"已启动"信息框（开机自启可见）----
+SET "READY=0"
+FOR /L %%I IN (1,1,30) DO (
+    FOR /F "tokens=1,2,3,4,5" %%A IN ('netstat -ano ^| findstr ":%PORT%" ^| findstr "LISTENING"') DO (
+        SET "READY=1"
+    )
+    IF "!READY!"=="1" GOTO :LAUNCHED
+    timeout /t 1 >nul
+)
+:LAUNCHED
+
+REM ---- 内联 VBScript 弹窗：提示已启动 + 访问地址 ----
+SET "VBS=%TEMP%\chanlun_launched.vbs"
+(
+    echo Set WshShell = CreateObject^("WScript.Shell"^)
+    echo WshShell.Popup "✅ 缠论K线分析工具已启动" ^& vbCrLf ^& vbCrLf ^& "浏览器访问：http://localhost:%PORT%" ^& vbCrLf ^& "数据源：默认 Baostock（前端可切换 Tushare）", 0, "缠论分析工具", 64
+) > "%VBS%"
+cscript //nologo "%VBS%"
+DEL /F /Q "%VBS%" >nul 2>&1
 
 ENDLOCAL

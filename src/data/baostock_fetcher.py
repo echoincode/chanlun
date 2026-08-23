@@ -83,10 +83,13 @@ class BaostockClient(BaseFetcher):
         frequency: str = "d",
         adjustflag: str = "2",
     ) -> pd.DataFrame:
-        """获取日线数据，返回标准 8 列 DataFrame。
+        """获取日线数据（A股/ETF/指数通用），返回标准 8 列 DataFrame。
+
+        使用 query_history_k_data_plus 通用接口，支持区间查询与前复权(adjustflag="2")。
+        Baostock 不区分市场类型，ETF 与股票共用同一接口，仅 code 不同。
 
         Args:
-            code: Tushare 风格（600588.SH）或 Baostock 风格（sh.600588）
+            code: Tushare 风格（600588.SH / 510300.SH）或 Baostock 风格（sh.600588）
             start_date: 起始日期 YYYY-MM-DD
             end_date: 结束日期 YYYY-MM-DD
             market_type: stock/etf/index/hk（仅用于接口透明，Baostock 不区分）
