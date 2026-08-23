@@ -18,9 +18,21 @@ services:
       - APP_PASSWORD=${APP_PASSWORD:-}
       - APP_PASSWORD_HASH=${APP_PASSWORD_HASH:-}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      # 每日收盘分型监控标的（逗号分隔，如 "600519.SH,000001.SZ,513050.SH"）
+      - MONITOR_CODES=${MONITOR_CODES:-}
+      # 监控通知渠道：none（仅打印）/ feishu / wecom
+      - NOTIFY_CHANNEL=${NOTIFY_CHANNEL:-none}
+      - NOTIFY_TIME=${NOTIFY_TIME:-16:30}
+      - NOTIFY_LOOKBACK_DAYS=${NOTIFY_LOOKBACK_DAYS:-120}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+      - FEISHU_SECRET=${FEISHU_SECRET:-}
+      - WECOM_WEBHOOK=${WECOM_WEBHOOK:-}
     volumes:
       # 挂载结果输出目录，便于宿主机查看生成的 HTML 图表
       - ./results:/app/results
+      # 挂载 state 目录，持久化监控分型快照（否则容器重启丢失上次分型对照）
+      - ./state:/app/state
+      - ./cache:/app/cache
     command: ["streamlit", "run", "web/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
     restart: unless-stopped
 
@@ -34,8 +46,17 @@ services:
       - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
       - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - MONITOR_CODES=${MONITOR_CODES:-}
+      - NOTIFY_CHANNEL=${NOTIFY_CHANNEL:-none}
+      - NOTIFY_TIME=${NOTIFY_TIME:-16:30}
+      - NOTIFY_LOOKBACK_DAYS=${NOTIFY_LOOKBACK_DAYS:-120}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+      - FEISHU_SECRET=${FEISHU_SECRET:-}
+      - WECOM_WEBHOOK=${WECOM_WEBHOOK:-}
     volumes:
       - ./results:/app/results
+      - ./state:/app/state
+      - ./cache:/app/cache
     # 进入交互式 shell，由用户在容器内手动运行脚本
     command: ["bash"]
     stdin_open: true
