@@ -15,6 +15,9 @@ state/*.json
 # 通达信最优服务器配置（运行时生成）
 best_server.json
 
+# 临时/AI 生成文档目录（接口草稿、中间产物，不纳入版本控制）
+temp/
+
 # Python 字节码缓存
 __pycache__/
 *.pyc
