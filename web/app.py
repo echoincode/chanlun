@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 添加项目根目录到路径以导入 src / web 模块（streamlit run 下脚本目录非仓库根）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -261,8 +261,8 @@ def main():
             with col1:
                 start_date = st.date_input(
                     "开始日期",
-                    value=settings.DEFAULT_START_DATE,
-                    help="数据获取的起始日期",
+                    value=(datetime.now() - timedelta(days=1000)).date(),
+                    help="数据获取的起始日期（默认当天往前 1000 天）",
                 )
             with col2:
                 end_date = st.date_input(
