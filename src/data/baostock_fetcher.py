@@ -17,6 +17,7 @@ from typing import Optional
 import pandas as pd
 
 from src.data.base_fetcher import BaseFetcher
+from src.utils.logger import log
 
 warnings.filterwarnings("ignore")
 
@@ -106,6 +107,9 @@ class BaostockClient(BaseFetcher):
 
         try:
             self._ensure_login()
+            log("BAOSTOCK", "INFO",
+                f"请求日线数据 [{bs_code}] {sd}~{ed} freq={frequency} adjust={adjustflag}",
+                code=code, market_type=market_type)
             rs = self._bs.query_history_k_data_plus(
                 code=bs_code,
                 fields="date,code,open,high,low,close,volume,amount",
@@ -115,6 +119,8 @@ class BaostockClient(BaseFetcher):
                 adjustflag=adjustflag,
             )
             if rs.error_code != "0":
+                log("BAOSTOCK", "ERROR",
+                    f"取数失败: {rs.error_code} - {rs.error_msg}", code=code)
                 raise RuntimeError(
                     f"Baostock 取数失败: {rs.error_code} - {rs.error_msg}"
                 )
@@ -127,7 +133,10 @@ class BaostockClient(BaseFetcher):
                 rows,
                 columns=["date", "code", "open", "high", "low", "close", "volume", "amount"],
             )
-            return self._to_standard_dataframe(df, code)
+            std = self._to_standard_dataframe(df, code)
+            log("BAOSTOCK", "INFO",
+                f"取数成功，返回 {len(std)} 条", code=code, rows=len(std))
+            return std
         finally:
             self._logout()
 

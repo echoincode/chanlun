@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from src.data.baostock_fetcher import BaostockClient
+from src.utils.logger import log
 
 _CACHE_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -94,12 +95,20 @@ def ensure_trade_calendar(end_date: str | None = None) -> pd.DataFrame:
             return local  # 已覆盖，直接返回
         # 只需补齐 (local_max 次日, end_date]
         fetch_start = (datetime.strptime(local_max, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        log("TRADE_CAL", "INFO",
+            f"本地交易日历已覆盖至 {local_max}，增量补齐 {fetch_start}~{end_date}",
+            fetch_start=fetch_start, end=end_date)
     else:
         fetch_start = _CAL_START
+        log("TRADE_CAL", "INFO",
+            f"本地交易日历为空，首次全量拉取 {fetch_start}~{end_date}",
+            fetch_start=fetch_start, end=end_date)
 
     try:
         fresh = _fetch_from_baostock(fetch_start, end_date)
-    except Exception:
+    except Exception as e:
+        log("TRADE_CAL", "WARNING",
+            f"交易日历拉取失败，兜底本地（可能为空）: {e}")
         # 网络/接口失败：不阻塞调用方，返回已有本地（可能为空）
         return local
 
@@ -107,6 +116,8 @@ def ensure_trade_calendar(end_date: str | None = None) -> pd.DataFrame:
         return local
     merged = pd.concat([local, fresh], ignore_index=True)
     _save_local(merged)
+    log("TRADE_CAL", "INFO",
+        f"交易日历补齐完成，新增 {len(fresh)} 条，本地共 {len(merged)} 条")
     return merged
 
 
@@ -127,10 +138,16 @@ def is_trading_day(date_str: str) -> bool:
     local = ensure_trade_calendar(date_str)
     hit = local[local["date"] == date_str]
     if not hit.empty:
-        return int(hit.iloc[0]["is_trading_day"]) == 1
+        _is_td = int(hit.iloc[0]["is_trading_day"]) == 1
+        log("TRADE_CAL", "DEBUG",
+            f"is_trading_day({date_str})={_is_td}（本地命中）")
+        return _is_td
 
     # 本地无该日期（拉取失败等情况）：兜底到 weekday 判断
-    return datetime.strptime(date_str, "%Y-%m-%d").weekday() < 5
+    _fallback = datetime.strptime(date_str, "%Y-%m-%d").weekday() < 5
+    log("TRADE_CAL", "WARNING",
+        f"is_trading_day({date_str}) 本地缺失，兜底 weekday={_fallback}")
+    return _fallback
 
 
 def get_last_trading_day(date_str: str | None = None) -> str:

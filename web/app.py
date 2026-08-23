@@ -29,7 +29,7 @@ import streamlit as st
 from src.cli.runner import fetch_data, analyze
 from src.config import settings
 from src.utils.common import get_default_end_date, get_market_type, normalize_stock_code
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, get_recent_logs, read_log_file
 from src.visual.plotly_viz import plotly_chanlun_visualization, plotly_daily_candlestick
 from scripts.monitor_job import run_monitor
 from src.data.stock_names import get_stock_name, load_stock_names
@@ -112,6 +112,100 @@ def cached_analysis(stock_code, start_date, end_date, data_type, frequency, data
     }
     result, summary = analyze(df)
     return result, summary, source_meta
+
+
+# 日志视图中所有功能模块（component）标签，供前端筛选
+_LOG_COMPONENTS = ["WEB", "RUNNER", "KLINE_CACHE", "BAOSTOCK", "TUSHARE", "TRADE_CAL", "MONITOR", "CHANLUN", "SYSTEM"]
+
+# 级别颜色映射（Streamlit markdown 内联徽章）
+_LEVEL_BADGE = {
+    "DEBUG": "⚪",
+    "INFO": "🔵",
+    "WARNING": "🟡",
+    "ERROR": "🔴",
+}
+
+
+def _render_log_view():
+    """日志视图：按功能模块（component）分类筛选展示全范围日志。
+
+    支持：
+      - 来源切换：内存缓冲（本进程）/ 日志文件（含 monitor 独立进程）
+      - component 多选筛选
+      - 级别阈值 + 关键词搜索
+      - 自动刷新（可选）
+    """
+    st.markdown("### 📋 运行日志")
+    st.caption("按功能模块分类筛选；「日志文件」来源可查看定时任务（monitor 独立进程）的日志。")
+
+    # 筛选控件
+    col_src, col_comp, col_lvl, col_kw = st.columns([1.2, 2.5, 1, 1.8])
+    with col_src:
+        source = st.selectbox(
+            "来源",
+            options=["内存缓冲", "日志文件"],
+            index=0,
+            help="内存缓冲=本 Web 进程产生的日志；日志文件=含定时任务等跨进程的持久化日志",
+        )
+    with col_comp:
+        selected_components = st.multiselect(
+            "功能模块",
+            options=_LOG_COMPONENTS,
+            default=_LOG_COMPONENTS,
+            help="按功能模块筛选（WEB/RUNNER/缓存/数据源/交易日历/监控/算法等）",
+        )
+    with col_lvl:
+        level = st.selectbox("最低级别", options=["DEBUG", "INFO", "WARNING", "ERROR"], index=1)
+    with col_kw:
+        keyword = st.text_input("关键词", placeholder="消息包含…", label_visibility="collapsed")
+
+    col_auto, col_limit = st.columns([1, 1])
+    with col_auto:
+        auto_refresh = st.checkbox("自动刷新(3s)", value=False)
+    with col_limit:
+        limit = st.number_input("条数上限", min_value=50, max_value=5000, value=500, step=50)
+
+    # 读取日志
+    if source == "内存缓冲":
+        logs = get_recent_logs(
+            limit=limit,
+            components=selected_components or None,
+            level=level,
+            keyword=keyword.strip(),
+        )
+    else:
+        logs = read_log_file(
+            limit=limit,
+            components=selected_components or None,
+            level=level,
+            keyword=keyword.strip(),
+        )
+
+    if not logs:
+        st.info("暂无符合条件的日志记录。")
+        return
+
+    st.caption(f"共 {len(logs)} 条")
+
+    # 展示：时间 + 级别徽章 + component + message（+ 可展开 context）
+    for entry in logs:
+        ts = entry.get("ts", "")
+        lvl = entry.get("level", "INFO")
+        comp = entry.get("component", "SYSTEM")
+        msg = entry.get("message", "")
+        ctx = entry.get("context")
+        badge = _LEVEL_BADGE.get(lvl, "⚪")
+        header = f"`{ts}` {badge} **{comp}** · {msg}"
+        if ctx:
+            with st.expander(header, expanded=False):
+                st.json(ctx)
+        else:
+            st.markdown(header)
+
+    if auto_refresh:
+        import time
+        time.sleep(3)
+        st.rerun()
 
 
 def main():
@@ -260,6 +354,21 @@ def main():
 
         # 分析按钮
         analyze_button = st.button("🚀 开始分析", use_container_width=True)
+
+        # 视图切换：分析 / 日志
+        st.divider()
+        view = st.radio(
+            "视图",
+            options=["分析", "日志"],
+            index=0,
+            horizontal=True,
+            help="切换到「日志」可查看全范围分类日志（按功能模块筛选）",
+        )
+
+    # 日志视图
+    if view == "日志":
+        _render_log_view()
+        return
 
     # 主内容区
     # ⚠️ 完整保留原 session_state 自动触发逻辑（原 main.py 第 282 行）：

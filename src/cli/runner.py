@@ -84,7 +84,11 @@ def fetch_data(
         )
     # 接入本地缓存：本地优先，区间缺失时才远程查询并写回
     from src.data import kline_cache
+    from src.utils.logger import log
 
+    log("RUNNER", "INFO",
+        f"进入 Tushare 取数分支 [{code}] {start_date}~{end_date}",
+        code=code, start=start_date, end=end_date, market_type=market_type)
     df = kline_cache.load_or_fetch(
         code,
         start_date,
@@ -94,6 +98,9 @@ def fetch_data(
         market_type=market_type,
         adj="qfq",
     )
+    log("RUNNER", "INFO",
+        f"取数完成：{len(df)} 条（来源 {kline_cache.last_source}）",
+        code=code, rows=len(df), source=kline_cache.last_source)
     globals()["last_data_source"] = "tushare"
     return df
 
@@ -112,12 +119,16 @@ def _fetch_from_baostock(
     """
     from src.data.baostock_fetcher import BaostockClient
     from src.data import kline_cache
+    from src.utils.logger import log
 
     bs_freq = "d" if data_type == "daily" else str(frequency)
+    log("RUNNER", "INFO",
+        f"进入 Baostock 取数分支 [{code}] {start_date}~{end_date} freq={bs_freq}",
+        code=code, start=start_date, end=end_date, freq=bs_freq)
     try:
         client = BaostockClient()
         # Baostock 不区分市场类型，ETF/股票/指数统一走 query_history_k_data_plus 区间查询（前复权）
-        return kline_cache.load_or_fetch(
+        df = kline_cache.load_or_fetch(
             code,
             start_date,
             end_date,
@@ -126,6 +137,10 @@ def _fetch_from_baostock(
             frequency=bs_freq,
             adjustflag="2",
         )
+        log("RUNNER", "INFO",
+            f"取数完成：{len(df)} 条（来源 {kline_cache.last_source}）",
+            code=code, rows=len(df), source=kline_cache.last_source)
+        return df
     except ImportError:
         raise RuntimeError(
             "未安装 baostock，请执行: pip install baostock"

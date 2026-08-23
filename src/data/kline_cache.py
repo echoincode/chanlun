@@ -21,6 +21,8 @@ import os
 
 import pandas as pd
 
+from src.utils.logger import log
+
 # 缓存根目录（已在 .gitignore 忽略）
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cache")
 
@@ -117,11 +119,16 @@ def load_or_fetch(
     # 无缓存：直接全量查询并保存
     if cached is None:
         globals()["last_source"] = "remote"
+        log("KLINE_CACHE", "INFO",
+            f"本地无缓存，发起全量远程查询 [{start_date} ~ {end_date}]",
+            code=code, source=source, start=start_date, end=end_date)
         fresh = _call_fetcher(fetcher, code, start_date, end_date, fetcher_kwargs)
         if not fresh.empty:
             _save(code, fresh, source)
         globals()["last_local_count"] = 0
         globals()["last_remote_count"] = len(fresh)
+        log("KLINE_CACHE", "INFO",
+            f"远程查询完成，新增 {len(fresh)} 条", code=code, remote=len(fresh))
         return fresh
 
     cached_min = str(cached["datetime"].min())
@@ -135,6 +142,9 @@ def load_or_fetch(
         _hit = cached[mask]
         globals()["last_local_count"] = len(_hit)
         globals()["last_remote_count"] = 0
+        log("KLINE_CACHE", "INFO",
+            f"命中本地缓存（两端超出），未发起远程请求 [{start_date} ~ {end_date}]",
+            code=code, source=source, local=len(_hit))
         return _hit.reset_index(drop=True)
 
     # 部分缺失：补齐左段 / 右段
@@ -151,10 +161,16 @@ def load_or_fetch(
         _hit = cached[mask]
         globals()["last_local_count"] = len(_hit)
         globals()["last_remote_count"] = 0
+        log("KLINE_CACHE", "INFO",
+            f"命中本地缓存，未发起远程请求 [{start_date} ~ {end_date}]",
+            code=code, source=source, local=len(_hit))
         return _hit.reset_index(drop=True)
 
     globals()["last_source"] = "remote"
     _remote_rows = 0
+    log("KLINE_CACHE", "INFO",
+        f"本地缓存部分命中，发起缺失段补齐（{len(to_fetch)} 段）",
+        code=code, source=source, segments=[f"{s}~{e}" for s, e in to_fetch])
     for seg_start, seg_end in to_fetch:
         if seg_start > seg_end:
             continue
@@ -167,6 +183,10 @@ def load_or_fetch(
 
     # 写回合并后的全量缓存
     _save(code, cached, source)
+    _total = len(cached[(cached["datetime"] >= start_date) & (cached["datetime"] <= end_date)])
+    log("KLINE_CACHE", "INFO",
+        f"补齐完成：本地 {_total - _remote_rows} 条 · 新增 {_remote_rows} 条",
+        code=code, local=_total - _remote_rows, remote=_remote_rows)
 
     mask = (cached["datetime"] >= start_date) & (cached["datetime"] <= end_date)
     _result = cached[mask]
