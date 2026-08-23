@@ -64,3 +64,29 @@ services:
     profiles:
       - cli
     restart: "no"
+
+  # 每日收盘分型监控调度器（常驻，定时触发 scripts/monitor_job.py）
+  chanlun-monitor:
+    build: .
+    image: chanlun:latest
+    container_name: chanlun-monitor
+    environment:
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN:-}
+      - TUSHARE_API_URL=${TUSHARE_API_URL:-http://api.tushare.pro}
+      - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      # 监控专属配置（与 web 同源）
+      - MONITOR_CODES=${MONITOR_CODES:-}
+      - NOTIFY_CHANNEL=${NOTIFY_CHANNEL:-none}
+      - NOTIFY_TIME=${NOTIFY_TIME:-16:30}
+      - NOTIFY_LOOKBACK_DAYS=${NOTIFY_LOOKBACK_DAYS:-120}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+      - FEISHU_SECRET=${FEISHU_SECRET:-}
+      - WECOM_WEBHOOK=${WECOM_WEBHOOK:-}
+    volumes:
+      # 持久化分型快照与 K 线缓存（否则重启丢失，导致重复推送/重复取数）
+      - ./state:/app/state
+      - ./cache:/app/cache
+    # 常驻调度：每分钟检查 NOTIFY_TIME，交易日到点触发一次监控
+    command: ["bash", "scripts/run_monitor_scheduler.sh"]
+    restart: unless-stopped
