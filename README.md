@@ -108,7 +108,9 @@ chanlun/
 │   └── styles.py                 # 样式注入
 ├── scripts/
 │   ├── run_tushare.py            # CLI 交互式入口
-│   └── monitor_job.py            # 定时监控任务
+│   ├── monitor_job.py            # 定时监控任务
+│   └── run_monitor_scheduler.sh  # Monitor 常驻调度脚本（每分钟检查到点触发）
+├── start_web.bat                 # Windows 一键启动 Web + 弹窗提示
 ├── tests/golden_samples/         # 黄金样本（CSV + expected.json）
 ├── results/                      # 分析输出（HTML 图表）
 ├── cache/                        # 运行时 K 线缓存（自动生成）
@@ -169,16 +171,76 @@ chanlun/
 
 ### 方式三：Docker（推荐部署）
 
+> **环境说明（Windows 用户必读）**：本项目在 Windows 本机**没有安装 docker**，`docker` 命令位于 **WSL（Windows Subsystem for Linux）** 内。
+> 因此请在 **WSL 终端** 中操作，并把项目路径转换为 WSL 格式：
+> `E:\privateProject\chanlun` → `/mnt/e/privateProject/chanlun`。
+>
+> ```bash
+> # 进入 WSL 并切到项目目录
+> wsl
+> cd /mnt/e/privateProject/chanlun
+> ```
+
+#### 服务组成
+
+`docker-compose.yml` 定义了三个服务，注意它们的启动差异：
+
+| 服务 | 作用 | 默认是否随 `up -d` 启动 | 端口/常驻 |
+|------|------|------------------------|----------|
+| `chanlun-web` | Streamlit 图形分析界面（主力） | ✅ 是（无 profiles 限制） | 8501，按需启 |
+| `chanlun-monitor` | 每日收盘分型监控调度器（常驻，到点推飞书/企微） | ✅ 是（无 profiles 限制） | 常驻 `restart: unless-stopped` |
+| `chanlun-cli` | 命令行交互式 shell | ❌ 否（需 `--profile cli`） | 手动进，不常驻 |
+
+> **关键结论**：`docker compose up -d` 会**同时启动 `chanlun-web` 和 `chanlun-monitor`**（二者都没有 profiles 限制）。
+> 所以「Web + 监控全启动」**一条 `docker compose up -d` 就够了**，无需再单独跑 `up -d chanlun-monitor`。
+> `chanlun-monitor` 单独启动的命令只在你只想跑监控、不要 Web 时才用。
+
+#### 常用命令
+
 ```bash
-# 默认启动 Web 服务（端口 8501）
+# 1. 启动 Web + Monitor（日常用法，一条即可）
 docker compose up -d
 
-# 如需 CLI 交互式容器（按需）
+# 2. 仅启动 Monitor（不要 Web 时）
+docker compose up -d chanlun-monitor
+
+# 3. 顺带启动 CLI 交互容器（按需）
 docker compose --profile cli up -d
+
+# 4. 查看状态 / 日志
+docker compose ps
+docker compose logs -f chanlun-web
+
+# 5. 停止并删除所有相关容器、网络（保留 state/cache/results 挂载卷，数据不丢）
+docker compose down --remove-orphans
+
+# 6. 停止并删除 + 重新无缓存构建镜像 + 重启（改了代码后生效）
+docker compose down --remove-orphans
+docker compose build --no-cache
+docker compose up -d
 ```
 
+> ⚠️ `down` 默认**不删命名卷**（`state`/`cache`/`results` 挂载卷会保留，监控分型快照和 K 线缓存不丢）。
+> 一般不要加 `-v`，否则会丢失监控快照与缓存、导致重复推送/重复取数。
+> 如需连卷一起清，才用 `docker compose down -v`（慎用）。
+
+#### 监控调度配置（chanlun-monitor）
+
+`chanlun-monitor` 在交易日到达 `NOTIFY_TIME`（默认 `16:30`）时自动触发 `scripts/monitor_job.py`：
+
+| 环境变量 | 说明 | 默认 |
+|---------|------|------|
+| `MONITOR_CODES` | 监控标的，逗号分隔（如 `600519.SH,000001.SZ,513050.SH`） | 空（不监控） |
+| `NOTIFY_CHANNEL` | 通知渠道：`none` / `feishu` / `wecom` | `none` |
+| `NOTIFY_TIME` | 每日触发时间（交易日） | `16:30` |
+| `NOTIFY_LOOKBACK_DAYS` | 回看 K 线天数（分型判断窗口） | `120` |
+| `FEISHU_WEBHOOK` / `FEISHU_SECRET` | 飞书机器人配置 | 空 |
+| `WECOM_WEBHOOK` | 企业微信机器人配置 | 空 |
+
+#### 其它说明
+
 - 容器通过 `environment:` 从宿主机 `.env` 读取配置，**镜像本身不含任何密钥**
-- `results/` 挂载到宿主机，便于查看生成的 HTML 图表
+- `results/`、`state/`、`cache/` 均挂载到宿主机，便于查看 HTML 图表、持久化分型快照与 K 线缓存
 - 启动后 Web 侧栏会显示「运行环境自检」：认证状态、默认数据源、Tushare 是否就绪
 
 ---
