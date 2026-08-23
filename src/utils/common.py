@@ -37,12 +37,14 @@ def is_workday(date=None):
 
 
 def get_default_end_date():
-    """获取默认结束日期：如果今天是工作日则用今天，否则用上一个工作日"""
-    today = datetime.now()
-    if is_workday(today):
-        return today.date()
-    else:
-        return get_previous_workday().date()
+    """获取默认结束日期：回退到最近的交易日（含节假日判断）。
+
+    今天若是交易日则用今天，否则用上一个交易日（周末/法定节假日均生效）。
+    """
+    from src.data.trade_calendar import get_last_trading_day
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    return datetime.strptime(get_last_trading_day(today), "%Y-%m-%d").date()
 
 
 # ---------------------------------------------------------------------------

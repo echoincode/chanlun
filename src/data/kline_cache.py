@@ -32,6 +32,11 @@ _COLUMNS = ["datetime", "open", "high", "low", "close", "volume", "amount", "cod
 #   "remote" 表示发起过远程查询（Baostock / Tushare）
 # 供上层 UI 提示用户数据来源，仅作展示用途。
 last_source: str | None = None
+# 最近一次取数的条数拆分（供 UI 展示）：
+#   last_local_count  本次返回中来自本地缓存的行数
+#   last_remote_count 本次返回中来自远程新增查询的行数
+last_local_count: int = 0
+last_remote_count: int = 0
 
 
 def _safe_name(code: str) -> str:
@@ -115,6 +120,8 @@ def load_or_fetch(
         fresh = _call_fetcher(fetcher, code, start_date, end_date, fetcher_kwargs)
         if not fresh.empty:
             _save(code, fresh, source)
+        globals()["last_local_count"] = 0
+        globals()["last_remote_count"] = len(fresh)
         return fresh
 
     cached_min = str(cached["datetime"].min())
@@ -125,7 +132,10 @@ def load_or_fetch(
     if start_date < _prev_day(cached_min) and end_date > _next_day(cached_max):
         globals()["last_source"] = "local"
         mask = (cached["datetime"] >= start_date) & (cached["datetime"] <= end_date)
-        return cached[mask].reset_index(drop=True)
+        _hit = cached[mask]
+        globals()["last_local_count"] = len(_hit)
+        globals()["last_remote_count"] = 0
+        return _hit.reset_index(drop=True)
 
     # 部分缺失：补齐左段 / 右段
     to_fetch = []
@@ -138,21 +148,31 @@ def load_or_fetch(
     if not to_fetch:
         globals()["last_source"] = "local"
         mask = (cached["datetime"] >= start_date) & (cached["datetime"] <= end_date)
-        return cached[mask].reset_index(drop=True)
+        _hit = cached[mask]
+        globals()["last_local_count"] = len(_hit)
+        globals()["last_remote_count"] = 0
+        return _hit.reset_index(drop=True)
 
     globals()["last_source"] = "remote"
+    _remote_rows = 0
     for seg_start, seg_end in to_fetch:
         if seg_start > seg_end:
             continue
         fresh = _call_fetcher(fetcher, code, seg_start, seg_end, fetcher_kwargs)
         if not fresh.empty:
+            # 仅统计落在本请求区间内的新增行数
+            _fmask = (fresh["datetime"] >= start_date) & (fresh["datetime"] <= end_date)
+            _remote_rows += int(_fmask.sum())
             cached = pd.concat([cached, fresh], ignore_index=True)
 
     # 写回合并后的全量缓存
     _save(code, cached, source)
 
     mask = (cached["datetime"] >= start_date) & (cached["datetime"] <= end_date)
-    return cached[mask].reset_index(drop=True)
+    _result = cached[mask]
+    globals()["last_remote_count"] = _remote_rows
+    globals()["last_local_count"] = len(_result) - _remote_rows
+    return _result.reset_index(drop=True)
 
 
 def _call_fetcher(fetcher, code: str, start_date: str, end_date: str, kwargs: dict) -> "pd.DataFrame":

@@ -145,8 +145,10 @@ def _build_card(code: str, last: dict | None, current: dict | None) -> str:
 
 
 def _is_trading_day(date: datetime) -> bool:
-    """简化判定：周一到周五为交易日（不含法定节假日，已知局限见文档 §8）。"""
-    return date.weekday() < 5
+    """判定某天是否为交易日（含法定节假日，查本地交易日历，兜底 weekday）。"""
+    from src.data.trade_calendar import is_trading_day as _cal_is_td
+
+    return _cal_is_td(date.strftime("%Y-%m-%d"))
 
 
 def run_monitor(force: bool = False) -> dict:

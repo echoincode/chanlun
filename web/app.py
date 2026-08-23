@@ -106,7 +106,9 @@ def cached_analysis(stock_code, start_date, end_date, data_type, frequency, data
     )
     source_meta = {
         "source": _runner.last_data_source,           # "baostock" / "tushare"
-        "cache_hit": _kc.last_source == "local",      # 命中本地缓存
+        "cache_hit": _kc.last_source == "local",      # 命中本地缓存（未发起远程请求）
+        "local_count": _kc.last_local_count,          # 本次返回中来自本地缓存的条数
+        "remote_count": _kc.last_remote_count,        # 本次返回中来自远程新增查询的条数
     }
     result, summary = analyze(df)
     return result, summary, source_meta
@@ -328,11 +330,21 @@ def main():
                 # source_meta 随缓存返回，缓存命中时也是本次分析的真实来源
                 _src = source_meta.get("source", "baostock")
                 _cache_hit = source_meta.get("cache_hit", False)
+                _local_count = int(source_meta.get("local_count", 0) or 0)
+                _remote_count = int(source_meta.get("remote_count", 0) or 0)
                 _label = "Tushare" if _src == "tushare" else "Baostock"
+                # 返回总条数 = 本地命中 + 远程新增
+                _total_count = _local_count + _remote_count
                 if _cache_hit:
-                    st.info(f"📁 数据来源：本地缓存（{_label}，未发起远程请求）")
+                    st.info(
+                        f"📁 数据来源：本地缓存（{_label}，未发起远程请求）｜"
+                        f"共 {_total_count} 条（本地 {_local_count} 条 · 新增 0 条）"
+                    )
                 else:
-                    st.info(f"🌐 数据来源：实时查询 {_label}")
+                    st.info(
+                        f"🌐 数据来源：实时查询 {_label}｜"
+                        f"共 {_total_count} 条（本地 {_local_count} 条 · 新增 {_remote_count} 条）"
+                    )
 
                 # ETF 提示：Baostock 免费源对 ETF 不支持前复权，数据为未复权(除权)，
                 # 图上可能出现跳空缺口，缠论分型/笔识别需留意除权缺口干扰
