@@ -152,3 +152,14 @@ AI_MAX_RETRY = int(os.environ.get("AI_MAX_RETRY", "1"))
 AI_KLINE_WINDOW = int(os.environ.get("AI_KLINE_WINDOW", "30"))   # 以最新分型为起点的 K 线窗口根数（含分型本身及之后的 K 线与成交量，硬上限 60）
 # （不做基本面研判，无 AI_INCLUDE_FUNDAMENTALS 开关）
 # （资金流无开关：个股日资金流默认必须附带，见 src/ai/review.py build_single_payload）
+
+# ---------------------------------------------------------------------------
+# 收盘分型监控 - 内置定时调度（可选）
+# 由程序自身周期性触发 run_monitor(force=False)；非交易日 run_monitor 自行跳过。
+# 时区取机器本地时区（与 Dockerfile 锁定的 Asia/Shanghai 一致）。
+# ---------------------------------------------------------------------------
+MONITOR_SCHEDULE_ENABLED = os.environ.get("MONITOR_SCHEDULE_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+MONITOR_SCHEDULE_HOUR = int(os.environ.get("MONITOR_SCHEDULE_HOUR", "15"))
+MONITOR_SCHEDULE_MINUTE = int(os.environ.get("MONITOR_SCHEDULE_MINUTE", "30"))
+# 触发星期：APScheduler cron 表达式，如 mon-fri（工作日）/ *（每天）/ sun（仅周日）
+MONITOR_SCHEDULE_DAYS = os.environ.get("MONITOR_SCHEDULE_DAYS", "mon-fri").strip().lower()

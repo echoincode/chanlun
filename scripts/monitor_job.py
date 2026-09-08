@@ -177,10 +177,10 @@ def run_monitor(force: bool = False, enable_notify: bool = True) -> dict:
     """
     now = datetime.now()
     if not force and not _is_trading_day(now):
-        logger.info("[monitor] 跳过：非交易日（周末），date=%s", now.strftime("%Y-%m-%d"))
+        logger.info("[monitor] 跳过：非交易日（周末/节假日），date=%s", now.strftime("%Y-%m-%d"))
         return {
             "ran": False,
-            "skipped_reason": "非交易日（周末），跳过",
+            "skipped_reason": "非交易日（周末/节假日），跳过",
             "scanned": 0,
             "new_fractal": 0,
             "cards": [],

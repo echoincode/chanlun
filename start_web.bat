@@ -146,7 +146,7 @@ REM ---- 内联 VBScript 弹窗：提示已启动 + 访问地址 ----
 SET "VBS=%TEMP%\chanlun_launched.vbs"
 (
     echo Set WshShell = CreateObject^("WScript.Shell"^)
-    echo WshShell.Popup "✅ 缠论K线分析工具已启动" ^& vbCrLf ^& vbCrLf ^& "浏览器访问：http://localhost:%PORT%" ^& vbCrLf ^& "数据源：默认 StockDB（本地服务，免 token）", 0, "缠论分析工具", 64
+    echo WshShell.Popup "缠论K线分析工具已启动" ^& vbCrLf ^& vbCrLf ^& "浏览器访问：http://localhost:%PORT%" ^& vbCrLf ^& "数据源：默认 StockDB（本地服务，免 token）", 0, "缠论分析工具", 64
 ) > "%VBS%"
 cscript //nologo "%VBS%"
 DEL /F /Q "%VBS%" >nul 2>&1

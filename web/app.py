@@ -36,8 +36,15 @@ from src.data.stock_names import get_stock_name, load_stock_names
 from web.auth import check_password
 from web.styles import inject_styles, inject_ai_fab_js
 from src.ai.review import build_single_payload, call_ai, parse_review
+from src.scheduler import start_background_scheduler
 
 logger = get_logger(__name__)
+
+# 收盘分型监控内置定时调度：随 Web 进程启动（幂等，未启用则跳过）
+try:
+    start_background_scheduler()
+except Exception:  # noqa: BLE001
+    logger.warning("监控调度器启动失败（不影响 Web 正常使用）", exc_info=True)
 
 # 页面配置
 st.set_page_config(**settings.PAGE_CONFIG)
@@ -294,6 +301,10 @@ def main():
                 help="在原始蜡烛图上叠加 MA5/10/20/30/60 均线（基于区间收盘价）",
             )
 
+        # 分析按钮（置于每日收盘监控之上：日常以"分析"为主入口，
+        # 避免每次分析都要下拉且易误点监控按钮）
+        analyze_button = st.button("🚀 开始分析", use_container_width=True)
+
         # 每日收盘监控：手动立即触发（复用 scripts/monitor_job.run_monitor）
         with st.container(border=True):
             st.markdown("**🔔 每日收盘监控**")
@@ -345,9 +356,6 @@ def main():
                     except Exception as e:
                         logger.error("监控按钮执行失败: %s", e)
                         st.error(f"❌ 监控执行失败: {str(e)}")
-
-        # 分析按钮
-        analyze_button = st.button("🚀 开始分析", use_container_width=True)
 
         # 视图切换：分析 / 日志
         st.divider()
