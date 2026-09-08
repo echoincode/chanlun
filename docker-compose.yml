@@ -1,0 +1,67 @@
+services:
+  # Web 图形界面（推荐）
+  chanlun-web:
+    build: .
+    image: chanlun:latest
+    container_name: chanlun-web
+    ports:
+      - "8501:8501"
+    environment:
+      # 时区（日志与页面时间展示）：默认 Asia/Shanghai，可用宿主环境变量 TZ 覆盖
+      - TZ=${TZ:-Asia/Shanghai}
+      - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+      # 登录口令：AUTH_ENABLED=true 时必填，未配置服务拒绝启动（fail-fast）。
+      # 内网/本地部署可设 AUTH_ENABLED=false 关闭登录守卫。
+      - APP_PASSWORD=${APP_PASSWORD:-}
+      - APP_PASSWORD_HASH=${APP_PASSWORD_HASH:-}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      # 收盘分型监控标的（Web 页面手动触发；逗号分隔，如 "600519.SH,000001.SZ,513050.SH"）
+      - MONITOR_CODES=${MONITOR_CODES:-}
+      # 监控通知渠道：none（仅打印）/ feishu / wecom
+      - NOTIFY_CHANNEL=${NOTIFY_CHANNEL:-none}
+      - NOTIFY_LOOKBACK_DAYS=${NOTIFY_LOOKBACK_DAYS:-120}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+      - FEISHU_SECRET=${FEISHU_SECRET:-}
+      - WECOM_WEBHOOK=${WECOM_WEBHOOK:-}
+    volumes:
+      # 挂载结果输出目录，便于宿主机查看生成的 HTML 图表
+      - ./results:/app/results
+      # 挂载 state 目录，持久化监控分型快照（否则容器重启丢失上次分型对照）
+      - ./state:/app/state
+      - ./cache:/app/cache
+    command: ["streamlit", "run", "web/app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true", "--browser.gatherUsageStats=false"]
+    # Web 健康检查：容器启动后轮询 Streamlit 健康端点（cli 不提供 HTTP，故仅 web 加）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # CLI 命令行交互式入口（可选，按需启动）
+  chanlun-cli:
+    build: .
+    image: chanlun:latest
+    container_name: chanlun-cli
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - CHANLUN_LOG_LEVEL=${CHANLUN_LOG_LEVEL:-INFO}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - MONITOR_CODES=${MONITOR_CODES:-}
+      - NOTIFY_CHANNEL=${NOTIFY_CHANNEL:-none}
+      - NOTIFY_LOOKBACK_DAYS=${NOTIFY_LOOKBACK_DAYS:-120}
+      - FEISHU_WEBHOOK=${FEISHU_WEBHOOK:-}
+      - FEISHU_SECRET=${FEISHU_SECRET:-}
+      - WECOM_WEBHOOK=${WECOM_WEBHOOK:-}
+    volumes:
+      - ./results:/app/results
+      - ./state:/app/state
+      - ./cache:/app/cache
+    # 进入交互式 shell，由用户在容器内手动运行脚本
+    command: ["bash"]
+    stdin_open: true
+    tty: true
+    profiles:
+      - cli
+    restart: "no"

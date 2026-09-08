@@ -1,0 +1,64 @@
+# Phase 0 · Step 0-6 新建（仓库根此前无 .gitignore）
+# 严格按《分步执行清单》Step 0-6 要求写入 6 条规则
+
+# 备份目录（冻结基准，不纳入版本控制）
+project_backup/
+
+# 运行时缓存与产物目录（含所有行情 CSV / 名称映射，整体不入库）
+cache/
+**/cache/
+results/
+
+# 监控任务运行时快照（每只标的上次分型状态，不纳入版本控制）
+state/*.json
+
+# 通达信最优服务器配置（运行时生成）
+best_server.json
+
+# 临时/AI 生成文档目录（接口草稿、中间产物，不纳入版本控制）
+temp/
+
+# Python 字节码缓存
+__pycache__/
+*.pyc
+
+# Git 自身元数据
+.git/
+
+# 环境变量（含敏感 Tushare token / webhook，禁止提交）
+# 通用忽略所有 .env 变体（保留 .env.example 作为模板提交）
+.env
+.env.*
+!.env.example
+
+# 运行时日志
+streamlit.log
+streamlit.err
+*.log
+*.err
+logs/
+**/logs/
+
+# ===== 敏感 / 私有文件兜底（禁止提交） =====
+# 测试脚本目录（整体不入库，含个人 API / 凭据测试）
+tests/
+
+# 私有部署配置、密钥文件
+*.key
+*.pem
+*.crt
+secrets.yaml
+secrets.yml
+config.local.*
+
+# 编辑器 / OS 元数据
+.vscode/
+.idea/
+.DS_Store
+.venv/
+venv/
+
+# 本地调试/测试产物（如 AI 研判 payload，非源码，不入库）
+payload_*.json
+payload_*.txt
+

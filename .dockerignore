@@ -1,0 +1,41 @@
+# 运行时缓存与本地状态（容器内由程序自动生成，无需打进镜像）
+cache/
+state/
+results/
+
+# 本地调试/测试产物（非运行时需要，避免打进镜像）
+payload_601228.json
+payload_601228.txt
+tests/
+
+# 本地环境文件（含敏感 token，必须由宿主机注入，绝不进镜像）
+.env
+.env.local
+.env.*
+
+# 日志
+*.log
+streamlit.log
+start_web.log
+
+# 平台专用启动脚本（仅本地 Windows 使用）
+start_web.bat
+
+# Python 缓存 / 虚拟环境 / 测试
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# 文档与 git
+docs/
+.git/
+.gitignore
+README.md
+
+# IDE
+.vscode/
+.idea/
+.codebuddy/

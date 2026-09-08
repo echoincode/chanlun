@@ -1,0 +1,9 @@
+# Streamlit 项目级配置
+# 关闭 Streamlit 的使用统计与首次启动时的"邮箱注册"交互式提示，
+# 让 `start_web.bat` 等后台脚本无需人工输入即可完成启动。
+#
+# 注意：设为 false 后，Streamlit 不再上报匿名使用数据，也不会再出现邮件注册弹窗。
+# 如需重新启用统计，请改回 true 或删除本文件。
+
+[browser]
+gatherUsageStats = false
