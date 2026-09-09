@@ -35,7 +35,7 @@ from scripts.monitor_job import run_monitor
 from src.data.stock_names import get_stock_name, load_stock_names
 from web.auth import check_password
 from web.styles import inject_styles, inject_ai_fab_js
-from src.ai.review import build_single_payload, call_ai, parse_review
+from src.ai.review import build_single_payload, call_ai, parse_review, save_ai_analysis, validate_review
 from src.scheduler import start_background_scheduler
 
 logger = get_logger(__name__)
@@ -485,6 +485,7 @@ def main():
                 st.session_state.ai_ctx = {
                     "summary": summary,
                     "kline_tail": _kline_tail,
+                    "full_result": result,
                     "stock_code": stock_code,
                     "stock_name": stock_name,
                     "data_type": data_type,
@@ -613,6 +614,7 @@ def _ai_dialog_body():
                 ctx["kline_tail"], ctx["summary"],
                 ctx["stock_code"], ctx["stock_name"],
                 data_type=ctx["data_type"], frequency=ctx["frequency"],
+                full_series=ctx.get("full_result"),
             )
             if not payload:
                 status.update(label="未识别到分型", state="error")
@@ -624,6 +626,23 @@ def _ai_dialog_body():
             try:
                 resp = call_ai(payload)
                 review = parse_review(resp)
+                # 后置守门：校验不通过（评级非法/引用缺失数据/累计金额与
+                # computed_stats 不符）时，带上问题清单重试一次
+                _problems = validate_review(payload, review)
+                if _problems:
+                    logger.warning("AI 研判校验未通过，带反馈重试: %s", _problems)
+                    status.update(label="⚠️ 首次结果校验未通过，正在修正重试…")
+                    _note = (
+                        "你上一次的输出存在以下问题，请逐条修正后按原 JSON 格式重新输出：\n- "
+                        + "\n- ".join(_problems)
+                    )
+                    resp = call_ai(payload, extra_user_note=_note)
+                    review = parse_review(resp)
+                    _problems2 = validate_review(payload, review)
+                    if _problems2:
+                        # 重试后仍有问题：保留结果但显式提示人工复核，不静默吞掉
+                        review.setdefault("need_human_review", []).append(
+                            "自动校验未通过: " + "; ".join(_problems2))
             except Exception as e:
                 status.update(label="❌ AI 研判失败", state="error")
                 logger.error("AI 深度分析失败: %s", e)
@@ -635,14 +654,18 @@ def _ai_dialog_body():
         st.session_state.ai_dialog_payload = payload
         st.session_state.ai_dialog_review = review
         st.session_state.ai_result = review  # 供弹窗关闭后的折叠区回看
+        # 留存：发送内容 + 返回结果 落到 output/ai_analysis/
+        save_ai_analysis(ctx.get("stock_code"), payload, review, ctx)
 
-    _render_sent_content(st.session_state.ai_dialog_payload, ctx)
+    # 顺序：AI 返回结果置顶，发送给大模型的内容放下面（用户聚焦结论优先）
     _render_review(st.session_state.ai_dialog_review, ctx)
+    _render_sent_content(st.session_state.ai_dialog_payload, ctx)
     _dialog_footer()
 
 
 def _render_sent_content(payload: dict, ctx: dict) -> None:
     """展示发送给 AI 的内容，并逐项解释其含义。"""
+    st.divider()
     st.subheader("📤 发送给大模型的内容")
     meta = payload.get("meta", {})
     ctx_d = payload.get("context", {})
@@ -652,25 +675,69 @@ def _render_sent_content(payload: dict, ctx: dict) -> None:
     seg = sig.get("recent_segments", [])
     period = "日线" if meta.get("data_type") == "daily" else f"{meta.get('frequency')}分钟线"
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
     c1.metric("周期", period)
     c2.metric("K线窗口", f"{len(kline)} 根")
     c3.metric("最近分型", f"{len(fr)} 个")
     c4.metric("最近笔段", f"{len(seg)} 笔")
     _mf_days = sum(1 for r in kline if r.get("flow"))
     c5.metric("资金流", f"{_mf_days} 日" if meta.get("include_money_flow") else "未附带")
+    _has_ind = bool(meta.get("include_indicators")) or any(
+        r.get("macd_hist") is not None for r in kline)
+    c6.metric("技术指标", "已附带" if _has_ind else "未附带")
+    _has_turn = bool(meta.get("include_turnover")) or any(
+        r.get("turnover") is not None for r in kline)
+    c7.metric("换手率", "已附带" if _has_turn else "未附带")
+
+    c8, c9 = st.columns(2)
+    _has_margin = bool(meta.get("include_margin")) or any(
+        isinstance(r.get("margin"), dict) for r in kline)
+    c8.metric("融资融券", "已附带" if _has_margin else "未附带")
+    _unlocks = ctx_d.get("upcoming_unlocks") or []
+    if meta.get("include_unlock"):
+        c9.metric("限售解禁", f"{len(_unlocks)} 笔" if _unlocks else "已查询·无解禁")
+    else:
+        c9.metric("限售解禁", "未附带")
 
     st.markdown("**内容构成说明**")
     items = [
         ("📈 量价 K 线窗口（kline_window）",
          f"共 <b>{len(kline)}</b> 根，以「最新分型」为起点（含分型本身及其后的 K 线），"
-         "每根含 开/高/低/收、成交量(volume)、成交额(amount)。模型据此判断分型确认后的量价演化。"),
+         "每根含 开/高/低/收(元)、vol_wan(成交量·万股)、amount_wan(成交额·万元)；"
+         "并可能附带 vol_ratio(量比)、macd_hist(MACD柱)、rsi、above_ma20(是否站上20日线)、"
+         "ma_trend(均线排列) 与 turnover 换手率。"
+         "模型据此结合量价与指标研判分型确认后的演化。"),
         ("💵 个股日资金流（flow，内嵌于每根 K 线）",
          f"窗口中 <b>{_mf_days}</b> 根附带资金流（仅查询最新分型当日及其之后的交易日）："
-         "主力净流入(main_net)、超大/大/中/小单净流入(jumbo/big/mid/small_net)"
-         "及主力/散户买卖额；单位元，正=流入、负=流出。"
+         "main_net_wan(主力净额)、jumbo/big/mid/small_net_wan(超大/大/中/小单净额)；"
+         "单位<b>万元</b>（已预换算，模型无需换算），正=流入、负=流出。"
          "结合主力方向可判断分型确认时资金是否配合。无数据的交易日 flow 为 null；"
          "stockdb 取数失败时自动跳过，不影响本次研判。"),
+        ("📊 技术指标（indicators，内嵌每根 K 线 + 分型日快照）",
+         "窗口每根 K 线附带 macd_hist(MACD柱)、rsi、vol_ratio(量比)、"
+         "above_ma20(是否站上20日线)、ma_trend(均线排列)；"
+         "context.indicators 另给「最新分型当日」快照（macd_dif/dea、boll_upper/mid/lower 等）。"
+         "用于判断 MACD 金叉/死叉/背离、RSI 超买超卖——这是「量价确认」的核心硬证据。"
+         "指标计算失败会自动跳过，不影响研判。"),
+        ("🧮 预计算聚合与事实卡（computed_stats / fact_card / data_coverage）",
+         "代码预先精确算好：分型后涨跌幅、累计主力净流入(万元)、融资余额变化、"
+         "连跌天数、MACD 柱符号串与金叉死叉日、顶/底背离检测、量能趋势、笔结构位置、"
+         "前一同类型分型区间等；模型只做解读与加权，禁止自行加总换算——"
+         "这是防算术错误/防背离漏判的核心机制。data_coverage 告知各维度数据实际覆盖天数。"),
+        ("📈 扩展行情字段（turnover 换手率）",
+         "日线窗口每根 K 线附带 turnover(换手率 %)，由本地行情库 rd.get_data 拉取；"
+         "用于判断放量/异常换手（配合 vol_ratio 量比）。仅日线提供，分钟线不附带。"),
+        ("💳 融资融券（margin，内嵌每根 K 线）",
+         "窗口每根 K 线附带 margin：fin_value_wan(融资余额)、fin_buy_wan(融资买入额)、"
+         "fin_net_buy_wan(融资净买入)，单位<b>万元</b>（已预换算）。"
+         "融资余额上升 / 净买入放大 = 杠杆资金看多，是分型多空意愿的重要旁证；"
+         "顶分型若融资余额仍在升，则需警惕分型可信度。仅日线提供。"),
+        ("🔓 未来限售解禁（upcoming_unlocks，context 顶层）",
+         f"列表共 <b>{len(ctx_d.get('upcoming_unlocks') or [])}</b> 笔，"
+         "每笔含 day(解禁日)、num(解禁股数)、rate1(占总股本比例)、rate2(占流通股本比例)。"
+         "注意 rate1/rate2 是 0~1 的小数（0.7077 = 70.77%）而非百分数；"
+         "rate2>0.05（占流通股本 5% 以上）即明显供给抛压，会被要求写入 risk_points 并下调底分型可信度；"
+         "列表为空表示「已查询且近期无解禁」。仅日线提供。"),
         ("💰 最新收盘（last_close）",
          f"窗口最后一根收盘价：<b>{ctx_d.get('last_close')}</b>"),
         ("🔺 最近分型序列（recent_fractals）",
@@ -678,7 +745,11 @@ def _render_sent_content(payload: dict, ctx: dict) -> None:
         ("📏 最近笔段（recent_segments）",
          f"最近 <b>{len(seg)}</b> 笔，含方向(up/down)，刻画当前笔的延伸。"),
         ("⚙️ 周期与配置（meta）",
-         f"{period}；含资金流：{'是' if meta.get('include_money_flow') else '否'}。"
+         f"{period}；含资金流：{'是' if meta.get('include_money_flow') else '否'}；"
+         f"含技术指标：{'是' if meta.get('include_indicators') else '否'}；"
+         f"含换手率：{'是' if meta.get('include_turnover') else '否'}；"
+         f"含融资融券：{'是' if meta.get('include_margin') else '否'}；"
+         f"含限售解禁：{'是' if meta.get('include_unlock') else '否'}。"
          "本项目不做基本面研判，不传任何基本面数据。"),
     ]
     for title, desc in items:
@@ -694,7 +765,6 @@ def _render_sent_content(payload: dict, ctx: dict) -> None:
 
 def _render_review(review: dict, ctx: dict) -> None:
     """展示 AI 返回的研判结果，重点字段卡片化。"""
-    st.divider()
     st.subheader("📥 AI 返回结果")
     _period = "日线" if ctx.get("data_type") == "daily" else f"{ctx.get('frequency')}分钟线"
     st.caption(
@@ -718,6 +788,38 @@ def _render_review(review: dict, ctx: dict) -> None:
         f"{review.get('credibility_reason', '')}",
         unsafe_allow_html=True,
     )
+    if review.get("signal_status"):
+        st.markdown(f"**信号状态**：{review['signal_status']}")
+    # C 层：确认项打分卡（7 维度逐项 hit/miss/unknown）
+    conf = review.get("confirmations") or {}
+    if conf:
+        _dim_label = {
+            "form": "分型形态", "price_volume": "量价配合", "macd": "MACD 同向",
+            "money_flow": "主力资金", "margin": "融资趋势", "structure": "笔结构",
+            "unlock": "无解禁抛压",
+        }
+        _st_style = {
+            "hit": ("✅ 命中", "#16a34a"), "miss": ("❌ 未中", "#dc2626"),
+            "unknown": ("❓ 数据缺失", "#d97706"),
+        }
+        rows = "".join(
+            "<tr>"
+            f"<td style='padding:4px 10px;border-bottom:1px solid rgba(0,0,0,.08);'>{_dim_label.get(dim, dim)}</td>"
+            f"<td style='padding:4px 10px;border-bottom:1px solid rgba(0,0,0,.08);color:{_st_style.get(d.get('status', 'unknown'), ('', '#6b7280'))[1]};'>{_st_style.get(d.get('status', 'unknown'), (d.get('status', 'unknown'), ''))[0]}</td>"
+            f"<td style='padding:4px 10px;border-bottom:1px solid rgba(0,0,0,.08);'>{d.get('evidence', '')}</td>"
+            "</tr>"
+            for dim, d in conf.items() if isinstance(d, dict)
+        )
+        if rows:
+            st.markdown(
+                '<div class="ai-card"><div class="ai-card-title">📋 确认项打分卡</div>'
+                "<table style='border-collapse:collapse;width:100%;font-size:13px;'>"
+                "<tr><th style='text-align:left;padding:4px 10px;'>维度</th>"
+                "<th style='text-align:left;padding:4px 10px;'>状态</th>"
+                "<th style='text-align:left;padding:4px 10px;'>依据</th></tr>"
+                f"{rows}</table></div>",
+                unsafe_allow_html=True,
+            )
     rp = review.get("risk_points") or []
     if rp:
         st.markdown(

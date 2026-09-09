@@ -80,6 +80,27 @@ def inject_styles() -> None:
         .ai-card-info {{ background: #eff6ff; border-color: #93c5fd; }}
         /* 弹窗内按钮间距 */
         .stDialog > div > div {{ max-width: 920px; }}
+        /* AI 弹窗内 st.metric 紧凑化：默认字号过大视觉突兀，收为标签+值的紧凑卡片 */
+        .stDialog [data-testid="stMetric"] {{
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 0.4rem 0.6rem;
+        }}
+        .stDialog [data-testid="stMetricLabel"] {{
+            font-size: 0.78rem;
+            color: #6b7280;
+            margin-bottom: 0.15rem;
+        }}
+        .stDialog [data-testid="stMetricValue"] {{
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #1f3a5f;
+            line-height: 1.25;
+        }}
+        .stDialog [data-testid="stMetricDelta"] {{
+            font-size: 0.7rem;
+        }}
         </style>
         """,
         unsafe_allow_html=True,

@@ -148,6 +148,13 @@ def _extract_fractals(processor: ChanlunProcessor) -> list[dict]:
                 .replace(" ", "")
                 .replace(":", "")
             )
+            # 分型强弱（strong/weak）：由 identify_fractals 基于分型自身3根K计算，
+            # 无未来函数。透传给 AI 作为确认层输入（weak=中继型，不构成有效反转）。
+            _strength = row.get("fractal_strength", None)
+            if _strength is None or (isinstance(_strength, float) and pd.isna(_strength)):
+                _strength = None
+            else:
+                _strength = str(_strength)
             fractals.append(
                 {
                     "index": int(idx),
@@ -155,6 +162,7 @@ def _extract_fractals(processor: ChanlunProcessor) -> list[dict]:
                     "high": float(row["high"]),
                     "low": float(row["low"]),
                     "datetime": str(int(dt_raw)),
+                    "strength": _strength,
                 }
             )
     return fractals

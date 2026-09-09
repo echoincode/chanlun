@@ -401,6 +401,10 @@ class ChanlunProcessor:
         result_df = df.copy()
         result_df['fractal_type'] = None
         result_df['is_fractal'] = False
+        # 强弱分级：按「第1根K线是否先突破创新高/低」分 strong/weak。
+        # strong=第1根即封顶/探底（反转果断）；weak=第3根仍创新高/低（中继型）。
+        # 该字段无未来函数（仅看分型自身3根K），供确认层/AI分析直接消费。
+        result_df['fractal_strength'] = None
         
         # 识别分型
         fractals = []
@@ -415,20 +419,27 @@ class ChanlunProcessor:
             is_bottom = self.check_bottom_fractal(klines, i)
             
             if is_top:
+                # 强弱：第1根 high >= 第3根 high → strong（第1根即封顶，反转果断）；
+                #       第3根仍更高 → weak（中继型，顶未真正形成）
+                strength = 'strong' if klines[i - 1]['high'] >= klines[i + 1]['high'] else 'weak'
                 fractals.append({
                     'index': i,
                     'datetime': result_df.loc[i]['datetime'],
                     'type': 'top',
                     'high': result_df.loc[i, 'high'],
-                    'low': result_df.loc[i, 'low']
+                    'low': result_df.loc[i, 'low'],
+                    'strength': strength
                 })
             elif is_bottom:
+                # 第1根 low <= 第3根 low → strong（第1根即探底）；第3根仍更低 → weak
+                strength = 'strong' if klines[i - 1]['low'] <= klines[i + 1]['low'] else 'weak'
                 fractals.append({
                     'index': i,
                     'datetime': result_df.loc[i]['datetime'],
                     'type': 'bottom',
                     'high': result_df.loc[i, 'high'],
-                    'low': result_df.loc[i, 'low']
+                    'low': result_df.loc[i, 'low'],
+                    'strength': strength
                 })
         
         # 标记分型
@@ -436,6 +447,7 @@ class ChanlunProcessor:
             idx = fractal['index']
             result_df.loc[idx, 'fractal_type'] = fractal['type']
             result_df.loc[idx, 'is_fractal'] = True
+            result_df.loc[idx, 'fractal_strength'] = fractal['strength']
         
         # 统计信息
         top_count = len([f for f in fractals if f['type'] == 'top'])

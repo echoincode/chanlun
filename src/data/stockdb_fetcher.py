@@ -171,6 +171,12 @@ class StockDBFetcher(BaseFetcher):
         通过 stockdb 底层表 rd.get('资金流', code, date) 逐交易日查询（已实测可用；
         ApiDoc §10.2 的高层 get_money_flow 在本机当前版本返回空，故走底层表）。
 
+        ⚠️ 关键：rd.get 返回的是「懒查询」QueryResult 对象，**必须调用 .do()** 才会
+        真正执行并返回真实 dict。直接 dict(rec) 会触发 QueryResult 的状态机异常
+        （TypeError: string indices must be integers），rec.get(key) 也会返回错误字符串。
+        历史上未加 .do() 导致「所有日期静默失败、返回 {}」，AI 深度分析因此拿不到资金流。
+        无数据日（周末/非交易日）.do() 返回 []，需在写入前跳过。
+
         Args:
             code:  标准代码风格(600588.SH)或纯数字(600588)
             dates: 单个 YYYYMMDD 字符串/整数，或它们的列表（自动去重、取前 8 位）
@@ -201,21 +207,22 @@ class StockDBFetcher(BaseFetcher):
         result = {}
         for d in norm:
             try:
-                rec = rd.get("资金流", code_num, str(d))
-                if not rec:
+                # QueryResult 是懒查询对象，必须 .do() 才会真正执行并返回真实 dict；
+                # 未 .do() 直接 dict(rec)/rec.get(key) 会触发状态机异常（见函数 docstring）。
+                # 无数据日（周末/非交易日）.do() 返回 []，需跳过。
+                data = rd.get("资金流", code_num, str(d)).do()
+                if not data:
                     continue
-                # QueryResult 的 .get 会返回嵌套 QueryResult（非数值），先转真实 dict
-                rec = dict(rec)
                 result[d] = {
-                    "main_net": _as_float(rec.get("main_net")),
-                    "jumbo_net": _as_float(rec.get("jumbo_net")),
-                    "big_net": _as_float(rec.get("big_net")),
-                    "mid_net": _as_float(rec.get("mid_net")),
-                    "small_net": _as_float(rec.get("small_net")),
-                    "main_in": _as_float(rec.get("main_in")),
-                    "main_out": _as_float(rec.get("main_out")),
-                    "retail_in": _as_float(rec.get("retail_in")),
-                    "retail_out": _as_float(rec.get("retail_out")),
+                    "main_net": _as_float(data.get("main_net")),
+                    "jumbo_net": _as_float(data.get("jumbo_net")),
+                    "big_net": _as_float(data.get("big_net")),
+                    "mid_net": _as_float(data.get("mid_net")),
+                    "small_net": _as_float(data.get("small_net")),
+                    "main_in": _as_float(data.get("main_in")),
+                    "main_out": _as_float(data.get("main_out")),
+                    "retail_in": _as_float(data.get("retail_in")),
+                    "retail_out": _as_float(data.get("retail_out")),
                 }
             except Exception as e:
                 log("STOCKDB", "WARN", f"资金流查询失败 [{code_num}] {d}: {e}")
@@ -227,6 +234,227 @@ class StockDBFetcher(BaseFetcher):
                 f"资金流获取为空 [{code_num}] 查询 {len(norm)} 个交易日均无数据",
                 code=code)
         return result
+
+    # ---- 行情补充字段（换手率 / 量比 / 振幅 / 估值等）----
+    def fetch_quote_extra(self, code: str, dates, fields=("turnover",)) -> dict:
+        """获取个股行情补充字段（如 turnover 换手率、vol_ratio 量比、amplitude 振幅、pe_ttm/pb 估值）。
+
+        基于 rd.get_data 批量接口，按日期区间查询后归一到 {date8: {field: value}}。
+        仅日线可靠（分钟线无换手率等字段）。任一异常返回 {}，不影响主流程。
+        """
+        code_num = _normalize_code(code)
+        if isinstance(dates, (str, int)):
+            dates = [dates]
+        norm = []
+        for d in dates:
+            s = "".join(ch for ch in str(d) if ch.isdigit())[:8]
+            if len(s) == 8 and s not in norm:
+                norm.append(s)
+        if not norm:
+            return {}
+        try:
+            rd = self._get_rdk(self.host, self.port)
+        except Exception as e:
+            log("STOCKDB", "WARN", f"quote_extra 连接失败 [{code_num}]: {e}")
+            return {}
+        start, end = min(norm), max(norm)
+        flds = ",".join(list(fields))
+        try:
+            data = rd.get_data([code_num], start=start, end=end, frequency="1d",
+                               fields=f"date,code,{flds}")
+            if data is None:
+                return {}
+            # rd.get_data 返回形态不稳定：可能为 dict{code: DataFrame} / list[dict] / DataFrame，
+            # 且 dict 的 key 未必是纯数字代码（可能带后缀）。统一归一成 DataFrame 后按 code 过滤。
+            if isinstance(data, dict):
+                _frames = [v for v in data.values() if v is not None]
+                if not _frames:
+                    return {}
+                if len(_frames) == 1:
+                    df = _frames[0]
+                else:
+                    df = pd.concat([
+                        v if isinstance(v, pd.DataFrame) else pd.DataFrame(v) for v in _frames
+                    ])
+            elif isinstance(data, list):
+                df = pd.DataFrame(data)
+            else:
+                df = data
+            if not isinstance(df, pd.DataFrame):
+                df = pd.DataFrame(df)
+            # rd.get_data 偶发以「位置列表」返回（列名为 0/1/2），按 fields 顺序补列名
+            _field_list = f"date,code,{flds}".split(",")
+            if list(df.columns) == list(range(len(_field_list))):
+                df.columns = _field_list
+            if df.empty:
+                return {}
+            # 返回可能含多标的，按 code 过滤（去掉交易所后缀再比）
+            if "code" in df.columns:
+                df = df[df["code"].astype(str).str.contains(code_num)]
+                if df.empty:
+                    return {}
+            result = {}
+            for _, row in df.iterrows():
+                d = "".join(ch for ch in str(row.get("date")) if ch.isdigit())[:8]
+                if len(d) != 8:
+                    continue
+                rec = {}
+                for f in fields:
+                    v = row.get(f) if f in row else None
+                    rec[f] = None if (v is None or pd.isna(v)) else _as_float(v)
+                result[d] = rec
+            if result:
+                log("STOCKDB", "INFO", f"quote_extra 获取成功 [{code_num}] {len(result)} 日",
+                    code=code)
+            return result
+        except Exception as e:
+            log("STOCKDB", "WARN", f"quote_extra 查询失败 [{code_num}]: {e}")
+            return {}
+
+    # ---- 融资融券（杠杆资金多空）----
+    def fetch_margin_trading(self, code: str, dates, fields=None) -> dict:
+        """获取个股融资融券信息（杠杆资金多空），归一到 {date8: {field: value}}。
+
+        基于 rd.get_mtss(security_list, start_date, end_date)，按窗口交易日区间查询。
+        默认取融资余额/买入/偿还、融券余量/卖出/偿还、两融余额。仅日线有意义。
+        任一异常返回 {}，不影响主流程。
+        """
+        _MTSS_COLS = ["date", "sec_code", "fin_value", "fin_buy_value", "fin_refund_value",
+                      "sec_value", "sec_sell_value", "sec_refund_value", "fin_sec_value"]
+        if fields is None:
+            fields = ("fin_value", "fin_buy_value", "fin_refund_value",
+                      "sec_value", "sec_sell_value", "sec_refund_value", "fin_sec_value")
+        code_num = _normalize_code(code)
+        if isinstance(dates, (str, int)):
+            dates = [dates]
+        norm = []
+        for d in dates:
+            s = "".join(ch for ch in str(d) if ch.isdigit())[:8]
+            if len(s) == 8 and s not in norm:
+                norm.append(s)
+        if not norm:
+            return {}
+        start = f"{min(norm)[:4]}-{min(norm)[4:6]}-{min(norm)[6:8]}"
+        end = f"{max(norm)[:4]}-{max(norm)[4:6]}-{max(norm)[6:8]}"
+        try:
+            self._get_rdk(self.host, self.port)  # 触发 init，确保 stock_sdk 模块可用
+            _ensure_sdk_importable()
+            import stock_sdk
+        except Exception as e:
+            log("STOCKDB", "WARN", f"margin 连接失败 [{code_num}]: {e}")
+            return {}
+        try:
+            data = stock_sdk.get_mtss(code_num, start_date=start, end_date=end)
+            if data is None:
+                return {}
+            df = data if isinstance(data, pd.DataFrame) else pd.DataFrame(data)
+            # get_mtss 偶发以「位置列表」返回（列名 0..8），按完整列序补名
+            if list(df.columns) == list(range(len(_MTSS_COLS))):
+                df.columns = _MTSS_COLS
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                return {}
+            if "sec_code" in df.columns:
+                df = df[df["sec_code"].astype(str).str.contains(code_num)]
+                if df.empty:
+                    return {}
+            result = {}
+            for _, row in df.iterrows():
+                d = "".join(ch for ch in str(row.get("date")) if ch.isdigit())[:8]
+                if len(d) != 8:
+                    continue
+                rec = {}
+                for f in fields:
+                    v = row.get(f) if f in row else None
+                    rec[f] = None if (v is None or pd.isna(v)) else _as_float(v)
+                result[d] = rec
+            if result:
+                log("STOCKDB", "INFO", f"margin 获取成功 [{code_num}] {len(result)} 日", code=code)
+            else:
+                log("STOCKDB", "WARN",
+                    f"融资融券获取为空 [{code_num}] {start}~{end} 区间均无数据", code=code)
+            return result
+        except Exception as e:
+            log("STOCKDB", "WARN", f"margin 查询失败 [{code_num}]: {e}")
+            return {}
+
+    # ---- 限售解禁（供给抛压）----
+    def fetch_locked_shares(self, code: str, start_date=None, forward_count=30) -> list:
+        """获取个股未来限售解禁（供给抛压），返回 [{day, num, rate1, rate2}, ...]。
+
+        基于 rd.get_locked_shares(stock_list, start_date, forward_count)：
+        取 start_date 起未来 forward_count 个交易日内的解禁事件。
+        num=解禁股数(股)、rate1=占总股本比例、rate2=占流通股本比例
+        （⚠️ rate1/rate2 是 0~1 的小数，如 0.7077 表示 70.77%，不是百分数）。
+        任一异常返回 []，不影响主流程。
+        """
+        code_num = _normalize_code(code)
+        sd = None
+        if start_date:
+            s = "".join(ch for ch in str(start_date) if ch.isdigit())[:8]
+            if len(s) == 8:
+                sd = f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+        try:
+            self._get_rdk(self.host, self.port)  # 触发 init，确保 stock_sdk 模块可用
+            _ensure_sdk_importable()
+            import stock_sdk
+        except Exception as e:
+            log("STOCKDB", "WARN", f"locked_shares 连接失败 [{code_num}]: {e}")
+            return []
+        try:
+            if sd:
+                data = stock_sdk.get_locked_shares(code_num, start_date=sd, forward_count=forward_count)
+            else:
+                data = stock_sdk.get_locked_shares(code_num, forward_count=forward_count)
+            if data is None:
+                return []
+            # 返回形态：单股时为 list[dict]，不限个股(stock_list=None)时为 dict{code: [records]}
+            if isinstance(data, dict):
+                _rows = []
+                for _v in data.values():
+                    if isinstance(_v, list):
+                        _rows.extend(_v)
+                    elif isinstance(_v, pd.DataFrame):
+                        _rows.append(_v)
+                if not _rows:
+                    return []
+                if any(isinstance(x, pd.DataFrame) for x in _rows):
+                    df = pd.concat([
+                        pd.DataFrame(x) if not isinstance(x, pd.DataFrame) else x for x in _rows
+                    ])
+                else:
+                    df = pd.DataFrame(_rows)
+            elif isinstance(data, list):
+                df = pd.DataFrame(data)
+            else:
+                df = data
+            if not isinstance(df, pd.DataFrame) or df.empty:
+                return []
+            if "code" in df.columns:
+                df = df[df["code"].astype(str).str.contains(code_num)]
+                if df.empty:
+                    return []
+            out = []
+            for _, row in df.iterrows():
+                day = "".join(ch for ch in str(row.get("day")) if ch.isdigit())[:8]
+                if len(day) != 8:
+                    continue
+                out.append({
+                    "day": day,
+                    "num": None if pd.isna(row.get("num")) else _as_float(row.get("num")),
+                    "rate1": None if pd.isna(row.get("rate1")) else _as_float(row.get("rate1")),
+                    "rate2": None if pd.isna(row.get("rate2")) else _as_float(row.get("rate2")),
+                })
+            if out:
+                log("STOCKDB", "INFO", f"locked_shares 获取成功 [{code_num}] {len(out)} 笔",
+                    code=code)
+            else:
+                log("STOCKDB", "WARN",
+                    f"限售解禁获取为空 [{code_num}] 起始日 {sd} 向前 {forward_count} 交易日均无事件",
+                    code=code)
+            return out
+        except Exception as e:
+            log("STOCKDB", "WARN", f"locked_shares 查询失败 [{code_num}]: {e}")
+            return []
 
     @staticmethod
     def _to_standard_dataframe(df, code: str) -> pd.DataFrame:

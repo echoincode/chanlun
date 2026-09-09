@@ -9,6 +9,9 @@ cache/
 **/cache/
 results/
 
+# AI 深度分析留存产物（output/ai_analysis 等，运行时生成，不纳入版本控制）
+output/
+
 # 监控任务运行时快照（每只标的上次分型状态，不纳入版本控制）
 state/*.json
 
