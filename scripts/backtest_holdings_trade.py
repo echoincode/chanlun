@@ -93,7 +93,8 @@ def build_merged(df_raw: pd.DataFrame):
     proc = ChanlunProcessor()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        trimmed = proc.trim_data_by_extremes(df_raw)
+        # 因果：不再按全局极值修剪起点（未来函数），直接对全部K线合并
+        trimmed = df_raw
         if trimmed.empty or len(trimmed) < 60:
             return None
         merged = proc.merge_klines(trimmed)
@@ -138,7 +139,8 @@ def build_merged_both(df_raw: pd.DataFrame):
     proc = ChanlunProcessor()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        trimmed = proc.trim_data_by_extremes(df_raw)
+        # 因果：不再按全局极值修剪起点（未来函数），直接对全部K线合并
+        trimmed = df_raw
         if trimmed.empty or len(trimmed) < 60:
             return None, None
         merged = proc.merge_klines(trimmed)

@@ -18,83 +18,12 @@ class ChanlunProcessor:
         self.chanlun_data = None
         self.initial_direction = None
         
-    def trim_data_by_extremes(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        根据极值点修剪K线数据
-        
-        步骤：
-        1. 找到所有K线中的最高价及其对应的datetime
-        2. 找到所有K线中的最低价及其对应的datetime  
-        3. 取这两个datetime中较小的一个
-        4. 丢弃该K线之前的所有数据
-        
-        Args:
-            df: 原始K线数据，必须包含datetime, high, low列
-            
-        Returns:
-            修剪后的DataFrame
-        """
-        if df.empty:
-            print("输入数据为空")
-            return pd.DataFrame()
-
-        # 检查必需的列
-        required_columns = ['datetime', 'high', 'low']
-        missing_cols = [col for col in required_columns if col not in df.columns]
-        if missing_cols:
-            print(f"缺少必需的列: {missing_cols}")
-            return df.copy()
-
-        # 复制数据避免修改原数据
-        result_df = df.copy()
-        
-        # 找到最高价的K线及其datetime
-        max_high_idx = df['high'].idxmax()
-        max_high_datetime = df.loc[max_high_idx, 'datetime']
-        max_high_value = df.loc[max_high_idx, 'high']
-        
-        # 找到最低价的K线及其datetime
-        min_low_idx = df['low'].idxmin()
-        min_low_datetime = df.loc[min_low_idx, 'datetime']
-        min_low_value = df.loc[min_low_idx, 'low']
-        
-        # 取两个datetime中较小的一个
-        earlier_datetime = min(max_high_datetime, min_low_datetime)
-        earlier_type = "最高价" if earlier_datetime == max_high_datetime else "最低价"
-        
-        # 确定初始方向
-        if earlier_type == "最高价":
-            self.initial_direction = "down"
-        else:
-            self.initial_direction = "up"
-        
-        # 找到该datetime对应的索引
-        earlier_idx = df[df['datetime'] == earlier_datetime].index[0]
-        
-        # 丢弃该K线之前的所有数据
-        if earlier_idx > 0:
-            trimmed_df = df.iloc[earlier_idx:].copy()
-            original_count = len(df)
-            trimmed_count = len(trimmed_df)
-            dropped_count = original_count - trimmed_count
-            
-            print(f"数据修剪完成:")
-            print(f"  - 最高价: {max_high_value} 发生时间: {max_high_datetime}")
-            print(f"  - 最低价: {min_low_value} 发生时间: {min_low_datetime}")
-            print(f"  - 选择较早的{earlier_type}时间点: {earlier_datetime}")
-            print(f"  - 原始数据: {original_count} 行")
-            print(f"  - 修剪后数据: {trimmed_count} 行")
-            print(f"  - 丢弃数据: {dropped_count} 行")
-            
-            return trimmed_df
-        else:
-            print("最早的数据点就是极值点，无需修剪")
-            # 确定初始方向
-            if earlier_type == "最高价":
-                self.initial_direction = "down"
-            else:
-                self.initial_direction = "up"
-            return df.copy()
+    # ------------------------------------------------------------------
+    # 注：原 trim_data_by_extremes 按"全局最高/最低价"决定数据起点，会偷看
+    # 未来（起点随数据截止日漂移），属未来函数，已在去未来函数重构中移除。
+    # process_klines 现在直接对传入的全部K线（截至当前日期）做合并与分型，
+    # 起点只由数据本身决定。相关脚本改为直接调用 merge_klines(df)。
+    # ------------------------------------------------------------------
     
     def check_inclusion(self, k1, k2):
         """
@@ -504,9 +433,11 @@ class ChanlunProcessor:
             if fractal_type is None:
                 continue
             
-            # 确定窗口范围
+            # 因果·无未来函数：窗口只看过去 [i-window, i]，不含未来（i+1..）。
+            # 旧版 end_idx = min(n-1, i+window) 会拿右侧未来K线参与极值判定，
+            # 导致新数据到来后已确认分型被取消。
             start_idx = max(0, i - window)
-            end_idx = min(n - 1, i + window)
+            end_idx = i
             
             if fractal_type == 'top':
                 # 顶分型：检查当前K线的高价是否是窗口内最高的
@@ -649,392 +580,19 @@ class ChanlunProcessor:
         
         return result_df
     
-    def validate_fractal_relationships(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        验证分型之间的关系（第六步）
-        
-        规则：
-        - 除第一个分型外，如果一个分型是底分型，那么它的低点必须小于它前一个顶分型的高点，也必须低于它后一个顶分型的高点
-        - 如果不满足这个条件，那么取消这个底分型的标记
-        - 同样的，如果一个分型是顶分型，那么它的高点必须大于它前一个底分型的低点，也必须高于它后一个底分型的低点
-        - 如果不满足这个条件，那么取消这个顶分型的标记
-        - 如果这一步有取消任何分型标记，那么这一步后要重新第五步连续分型的筛选
-        
-        Args:
-            df: 包含分型标记的DataFrame
-            
-        Returns:
-            验证后的DataFrame
-        """
-        if df.empty or 'is_fractal' not in df.columns:
-            print("没有分型数据需要验证")
-            return df
-        
-        print("开始验证分型之间的关系...")
-        
-        result_df = df.copy()
-        # 全局 P1 修复：直接基于 result_df 读取，删除 klines 副本
-        n = len(result_df)
-        
-        # 获取所有分型的索引
-        fractal_indices = []
-        for i in range(n):
-            if result_df.loc[i, 'is_fractal']:
-                fractal_indices.append(i)
-        
-        if len(fractal_indices) <= 1:
-            print("分型数量不足，跳过关系验证")
-            return result_df
-        
-        removed_count = 0
-        
-        # 验证每个分型（跳过第一个）
-        for i in range(1, len(fractal_indices)):
-            current_idx = fractal_indices[i]
-            current_fractal_type = result_df.loc[current_idx, 'fractal_type']
-            
-            if current_fractal_type is None:
-                continue
-            
-            # 找到前一个和后一个相反类型的分型
-            prev_opposite_idx = None
-            next_opposite_idx = None
-            
-            # 查找前一个相反类型的分型
-            for j in range(i - 1, -1, -1):
-                prev_idx = fractal_indices[j]
-                prev_type = result_df.loc[prev_idx, 'fractal_type']
-                if prev_type is not None and prev_type != current_fractal_type:
-                    prev_opposite_idx = prev_idx
-                    break
-            
-            # 查找后一个相反类型的分型
-            for j in range(i + 1, len(fractal_indices)):
-                next_idx = fractal_indices[j]
-                next_type = result_df.loc[next_idx, 'fractal_type']
-                if next_type is not None and next_type != current_fractal_type:
-                    next_opposite_idx = next_idx
-                    break
-            
-            # 验证分型关系
-            if current_fractal_type == 'bottom':
-                # 底分型：低点必须小于前一个顶分型的高点和后一个顶分型的高点
-                current_low = result_df.loc[current_idx, 'low']
-                valid = True
-                
-                if prev_opposite_idx is not None:
-                    prev_high = result_df.loc[prev_opposite_idx, 'high']
-                    if current_low >= prev_high:
-                        valid = False
-                        print(f"  - 底分型{current_idx}低点{current_low:.2f}不小于前一个顶分型{prev_opposite_idx}高点{prev_high:.2f}")
-                
-                if valid and next_opposite_idx is not None:
-                    next_high = result_df.loc[next_opposite_idx, 'high']
-                    if current_low >= next_high:
-                        valid = False
-                        print(f"  - 底分型{current_idx}低点{current_low:.2f}不小于后一个顶分型{next_opposite_idx}高点{next_high:.2f}")
-                
-                if not valid:
-                    result_df.loc[current_idx, 'fractal_type'] = None
-                    result_df.loc[current_idx, 'is_fractal'] = False
-                    removed_count += 1
-                    
-            elif current_fractal_type == 'top':
-                # 顶分型：高点必须大于前一个底分型的低点和后一个底分型的低点
-                current_high = result_df.loc[current_idx, 'high']
-                valid = True
-                
-                if prev_opposite_idx is not None:
-                    prev_low = result_df.loc[prev_opposite_idx, 'low']
-                    if current_high <= prev_low:
-                        valid = False
-                        print(f"  - 顶分型{current_idx}高点{current_high:.2f}不大于前一个底分型{prev_opposite_idx}低点{prev_low:.2f}")
-                
-                if valid and next_opposite_idx is not None:
-                    next_low = result_df.loc[next_opposite_idx, 'low']
-                    if current_high <= next_low:
-                        valid = False
-                        print(f"  - 顶分型{current_idx}高点{current_high:.2f}不大于后一个底分型{next_opposite_idx}低点{next_low:.2f}")
-                
-                if not valid:
-                    result_df.loc[current_idx, 'fractal_type'] = None
-                    result_df.loc[current_idx, 'is_fractal'] = False
-                    removed_count += 1
-        
-        print(f"分型关系验证完成:")
-        print(f"  - 取消分型标记: {removed_count} 个")
-        
-        # 如果有取消分型标记，需要重新执行第五步连续分型筛选
-        if removed_count > 0:
-            print("  - 检测到分型被取消，重新执行第五步连续分型筛选...")
-            result_df = self.filter_consecutive_fractals(result_df)
-        
-        # 统计最终结果
-        final_fractals = result_df[result_df['is_fractal']]
-        top_count = len(final_fractals[final_fractals['fractal_type'] == 'top'])
-        bottom_count = len(final_fractals[final_fractals['fractal_type'] == 'bottom'])
-        
-        print(f"  - 最终保留顶分型: {top_count} 个")
-        print(f"  - 最终保留底分型: {bottom_count} 个")
-        print(f"  - 最终保留分型: {len(final_fractals)} 个")
-        
-        return result_df
+    # ------------------------------------------------------------------
+    # 注：原 validate_fractal_relationships 会因"后一个分型"反手取消前面的
+    # 分型（依赖未来数据），属未来函数，已在去未来函数重构中移除。分型/笔的
+    # 确认现仅由 process_fractals 内的因果前向扫描决定，历史结论不随数据
+    # 截止日变化。
+    # ------------------------------------------------------------------
     
-    def filter_close_fractals(self, df: pd.DataFrame, min_gap: int = 4) -> pd.DataFrame:
-        """
-        筛选过于接近的分型对（第六步新增）
-        
-        规则：
-        - 如果一个顶分型An后面出现了一个底分型Bn且索引差小于min_gap，则需要特殊处理
-        - 如果一个底分型An后面出现了一个顶分型Bn且索引差小于min_gap，则需要特殊处理
-        
-        处理逻辑：
-        1. 顶分型→底分型情况（索引差<min_gap）：
-           - 找到Bn后面的顶分型An+1，比较An+1和An的高价，保留高价更高的
-           - 根据保留的顶分型，处理相关的底分型
-        
-        2. 底分型→顶分型情况（索引差<min_gap）：
-           - 找到Bn后面的底分型An+1，比较An+1和An的低价，保留低价更低的
-           - 根据保留的底分型，处理相关的顶分型
-        
-        Args:
-            df: 包含分型标记的DataFrame
-            min_gap: 最小索引间隔，默认为4
-            
-        Returns:
-            筛选后的DataFrame
-        """
-        if df.empty or 'is_fractal' not in df.columns:
-            print("没有分型数据需要筛选")
-            return df
-        
-        print(f"开始筛选间隔小于{min_gap}的接近分型...")
-        
-        result_df = df.copy()
-        # 全局 P1 修复：直接基于 result_df 读取，删除 klines 副本
-        n = len(result_df)
-        
-        # 获取所有分型的索引和类型
-        fractal_indices = []
-        for i in range(n):
-            if result_df.loc[i, 'is_fractal']:
-                fractal_indices.append({
-                    'index': i,
-                    'type': result_df.loc[i, 'fractal_type']
-                })
-        
-        if len(fractal_indices) <= 2:
-            print("分型数量不足，跳过接近分型筛选")
-            return result_df
-        
-        removed_count = 0
-        processed_pairs = set()  # 避免重复处理同一对分型
-        
-        # Bug 4 修复：fractal_indices 为构建时快照，循环内取消分型后快照 type 不更新。
-        # 用实时读取闭包，确保查找相邻分型时跳过已被取消的分型。
-        def real_type(idx):
-            return result_df.loc[idx, 'fractal_type'] if result_df.loc[idx, 'is_fractal'] else None
-        
-        # 遍历所有相邻的分型对
-        for i in range(len(fractal_indices) - 1):
-            current = fractal_indices[i]
-            next_fractal = fractal_indices[i + 1]
-            
-            # 检查是否已经处理过这对分型
-            pair_key = (current['index'], next_fractal['index'])
-            if pair_key in processed_pairs:
-                continue
-            
-            # Bug 4 修复：实时校验当前对是否仍有效（前面循环可能已取消）
-            if not result_df.loc[current['index'], 'is_fractal'] or not result_df.loc[next_fractal['index'], 'is_fractal']:
-                continue
-            
-            # 检查索引间隔
-            index_gap = next_fractal['index'] - current['index']
-            if index_gap >= min_gap:
-                continue
-            
-            processed_pairs.add(pair_key)
-            
-            # 情况1：顶分型→底分型
-            if real_type(current['index']) == 'top' and real_type(next_fractal['index']) == 'bottom':
-                An_idx = current['index']
-                Bn_idx = next_fractal['index']
-                
-                # 找到Bn后面的顶分型An+1
-                An1_idx = None
-                for j in range(i + 2, len(fractal_indices)):
-                    if real_type(fractal_indices[j]['index']) == 'top':
-                        An1_idx = fractal_indices[j]['index']
-                        break
-                
-                if An1_idx is not None:
-                    # 比较An和An+1的高价
-                    An_high = result_df.loc[An_idx, 'high']
-                    An1_high = result_df.loc[An1_idx, 'high']
-                    
-                    if An1_high > An_high:
-                        # 保留An+1，取消An
-                        result_df.loc[An_idx, 'fractal_type'] = None
-                        result_df.loc[An_idx, 'is_fractal'] = False
-                        removed_count += 1
-                        print(f"  - 顶分型{An_idx}高价{An_high:.2f}低于后续顶分型{An1_idx}高价{An1_high:.2f}，取消{An_idx}")
-                        
-                        # 找到An前面的底分型Bn-1
-                        Bn1_idx = None
-                        for j in range(i - 1, -1, -1):
-                            if real_type(fractal_indices[j]['index']) == 'bottom':
-                                Bn1_idx = fractal_indices[j]['index']
-                                break
-                        
-                        if Bn1_idx is not None:
-                            # 比较Bn-1和Bn的低价
-                            Bn1_low = result_df.loc[Bn1_idx, 'low']
-                            Bn_low = result_df.loc[Bn_idx, 'low']
-                            
-                            if Bn_low < Bn1_low:
-                                # 保留Bn，取消Bn-1
-                                result_df.loc[Bn1_idx, 'fractal_type'] = None
-                                result_df.loc[Bn1_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 底分型{Bn1_idx}低价{Bn1_low:.2f}高于后续底分型{Bn_idx}低价{Bn_low:.2f}，取消{Bn1_idx}")
-                            else:
-                                # 保留Bn-1，取消Bn
-                                result_df.loc[Bn_idx, 'fractal_type'] = None
-                                result_df.loc[Bn_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 底分型{Bn_idx}低价{Bn_low:.2f}不低于前底分型{Bn1_idx}低价{Bn1_low:.2f}，取消{Bn_idx}")
-                    else:
-                        # 保留An，取消An+1
-                        result_df.loc[An1_idx, 'fractal_type'] = None
-                        result_df.loc[An1_idx, 'is_fractal'] = False
-                        removed_count += 1
-                        print(f"  - 顶分型{An1_idx}高价{An1_high:.2f}不高于前顶分型{An_idx}高价{An_high:.2f}，取消{An1_idx}")
-                        
-                        # 找到An+1后面的底分型Bn+1
-                        Bn1_idx = None
-                        for j in range(i + 3, len(fractal_indices)):  # 跳过An和Bn
-                            if real_type(fractal_indices[j]['index']) == 'bottom':
-                                Bn1_idx = fractal_indices[j]['index']
-                                break
-                        
-                        if Bn1_idx is not None:
-                            # 比较Bn+1和Bn的低价
-                            Bn1_low = result_df.loc[Bn1_idx, 'low']
-                            Bn_low = result_df.loc[Bn_idx, 'low']
-                            
-                            if Bn_low < Bn1_low:
-                                # 保留Bn，取消Bn+1
-                                result_df.loc[Bn1_idx, 'fractal_type'] = None
-                                result_df.loc[Bn1_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 底分型{Bn1_idx}低价{Bn1_low:.2f}不低于前底分型{Bn_idx}低价{Bn_low:.2f}，取消{Bn1_idx}")
-                            else:
-                                # 保留Bn+1，取消Bn
-                                result_df.loc[Bn_idx, 'fractal_type'] = None
-                                result_df.loc[Bn_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 底分型{Bn_idx}低价{Bn_low:.2f}不低于后续底分型{Bn1_idx}低价{Bn1_low:.2f}，取消{Bn_idx}")
-            
-            # 情况2：底分型→顶分型
-            elif real_type(current['index']) == 'bottom' and real_type(next_fractal['index']) == 'top':
-                An_idx = current['index']
-                Bn_idx = next_fractal['index']
-                
-                # 找到Bn后面的底分型An+1
-                An1_idx = None
-                for j in range(i + 2, len(fractal_indices)):
-                    if real_type(fractal_indices[j]['index']) == 'bottom':
-                        An1_idx = fractal_indices[j]['index']
-                        break
-                
-                if An1_idx is not None:
-                    # 比较An和An+1的低价
-                    An_low = result_df.loc[An_idx, 'low']
-                    An1_low = result_df.loc[An1_idx, 'low']
-                    
-                    if An1_low < An_low:
-                        # 保留An+1，取消An
-                        result_df.loc[An_idx, 'fractal_type'] = None
-                        result_df.loc[An_idx, 'is_fractal'] = False
-                        removed_count += 1
-                        print(f"  - 底分型{An_idx}低价{An_low:.2f}高于后续底分型{An1_idx}低价{An1_low:.2f}，取消{An_idx}")
-                        
-                        # 找到An前面的顶分型Bn-1
-                        Bn1_idx = None
-                        for j in range(i - 1, -1, -1):
-                            if real_type(fractal_indices[j]['index']) == 'top':
-                                Bn1_idx = fractal_indices[j]['index']
-                                break
-                        
-                        if Bn1_idx is not None:
-                            # 比较Bn-1和Bn的高价
-                            Bn1_high = result_df.loc[Bn1_idx, 'high']
-                            Bn_high = result_df.loc[Bn_idx, 'high']
-                            
-                            if Bn_high > Bn1_high:
-                                # 保留Bn，取消Bn-1
-                                result_df.loc[Bn1_idx, 'fractal_type'] = None
-                                result_df.loc[Bn1_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 顶分型{Bn1_idx}高价{Bn1_high:.2f}低于后续顶分型{Bn_idx}高价{Bn_high:.2f}，取消{Bn1_idx}")
-                            else:
-                                # 保留Bn-1，取消Bn
-                                result_df.loc[Bn_idx, 'fractal_type'] = None
-                                result_df.loc[Bn_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 顶分型{Bn_idx}高价{Bn_high:.2f}不高于前顶分型{Bn1_idx}高价{Bn1_high:.2f}，取消{Bn_idx}")
-                    else:
-                        # 保留An，取消An+1
-                        result_df.loc[An1_idx, 'fractal_type'] = None
-                        result_df.loc[An1_idx, 'is_fractal'] = False
-                        removed_count += 1
-                        print(f"  - 底分型{An1_idx}低价{An1_low:.2f}不低于前底分型{An_idx}低价{An_low:.2f}，取消{An1_idx}")
-                        
-                        # 找到An+1后面的顶分型Bn+1
-                        Bn1_idx = None
-                        for j in range(i + 3, len(fractal_indices)):  # 跳过An和Bn
-                            if real_type(fractal_indices[j]['index']) == 'top':
-                                Bn1_idx = fractal_indices[j]['index']
-                                break
-                        
-                        if Bn1_idx is not None:
-                            # 比较Bn+1和Bn的高价
-                            Bn1_high = result_df.loc[Bn1_idx, 'high']
-                            Bn_high = result_df.loc[Bn_idx, 'high']
-                            
-                            if Bn_high > Bn1_high:
-                                # 保留Bn，取消Bn+1
-                                result_df.loc[Bn1_idx, 'fractal_type'] = None
-                                result_df.loc[Bn1_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 顶分型{Bn1_idx}高价{Bn1_high:.2f}不高于前顶分型{Bn_idx}高价{Bn_high:.2f}，取消{Bn1_idx}")
-                            else:
-                                # 保留Bn+1，取消Bn
-                                result_df.loc[Bn_idx, 'fractal_type'] = None
-                                result_df.loc[Bn_idx, 'is_fractal'] = False
-                                removed_count += 1
-                                print(f"  - 顶分型{Bn_idx}高价{Bn_high:.2f}不高于后续顶分型{Bn1_idx}高价{Bn1_high:.2f}，取消{Bn_idx}")
-        
-        print(f"接近分型筛选完成:")
-        print(f"  - 取消分型标记: {removed_count} 个")
-        
-        # 如果有取消分型标记，需要重新执行第五步连续分型筛选
-        if removed_count > 0:
-            print("  - 检测到分型被取消，重新执行第五步连续分型筛选...")
-            result_df = self.filter_consecutive_fractals(result_df)
-        
-        # 统计最终结果
-        final_fractals = result_df[result_df['is_fractal']]
-        top_count = len(final_fractals[final_fractals['fractal_type'] == 'top'])
-        bottom_count = len(final_fractals[final_fractals['fractal_type'] == 'bottom'])
-        
-        print(f"  - 最终保留顶分型: {top_count} 个")
-        print(f"  - 最终保留底分型: {bottom_count} 个")
-        print(f"  - 最终保留分型: {len(final_fractals)} 个")
-        
-        return result_df
-    
+    # ------------------------------------------------------------------
+    # 注：原 filter_close_fractals 会因“后一个分型”反手取消前面的分型
+    # （依赖未来数据），属未来函数，已在去未来函数重构中移除。笔的确认现仅
+    # 由 process_fractals 内的因果前向扫描（含 min_gap）决定。
+    # ------------------------------------------------------------------
+
     def process_fractals(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         处理分型识别的入口方法
@@ -1065,33 +623,10 @@ class ChanlunProcessor:
         consecutive_filtered_top_count = len(consecutive_filtered_fractals[consecutive_filtered_fractals['fractal_type'] == 'top'])
         consecutive_filtered_bottom_count = len(consecutive_filtered_fractals[consecutive_filtered_fractals['fractal_type'] == 'bottom'])
         
-        # 第四步：验证分型之间的关系（第六步）
-        relationship_filtered_df1 = self.validate_fractal_relationships(consecutive_filtered_df)
-        # relationship_filtered_fractals1 = relationship_filtered_df1[relationship_filtered_df1['is_fractal']]
-        # relationship_filtered_top_count1 = len(relationship_filtered_fractals1[relationship_filtered_fractals1['fractal_type'] == 'top'])
-        # relationship_filtered_bottom_count1 = len(relationship_filtered_fractals1[relationship_filtered_fractals1['fractal_type'] == 'bottom'])
-        
-        # 第五步：筛选接近分型（第七步）
-        final_df0 = self.filter_close_fractals(relationship_filtered_df1)
-        
-        # 第六步：再次验证分型之间的关系（第八步）
-        relationship_filtered_df = self.validate_fractal_relationships(final_df0)
-        relationship_filtered_fractals = relationship_filtered_df[relationship_filtered_df['is_fractal']]
-        relationship_filtered_top_count = len(relationship_filtered_fractals[relationship_filtered_fractals['fractal_type'] == 'top'])
-        relationship_filtered_bottom_count = len(relationship_filtered_fractals[relationship_filtered_fractals['fractal_type'] == 'bottom'])
-
-        # 第七步：筛选接近分型（第九步）
-        # Bug 3/4 修复：单次 filter_close 后取消的分型可能改变相邻关系，需迭代至稳定。
-        # 在原有两轮（第六/七/八/九步）基础上，继续循环 filter_close 直到分型数量不再变化。
-        final_df = self.filter_close_fractals(relationship_filtered_df)
-        max_iterations = 20  # 防御性上限，防止异常死循环
-        for _ in range(max_iterations):
-            before_count = len(final_df[final_df['is_fractal']])
-            final_df = self.validate_fractal_relationships(final_df)
-            final_df = self.filter_close_fractals(final_df)
-            after_count = len(final_df[final_df['is_fractal']])
-            if after_count == before_count:
-                break
+        # 第四步：识别笔（因果·单遍前向扫描，含 min_gap 过滤盘整毛刺）。
+        # 已移除旧版的 validate_fractal_relationships / filter_close_fractals 及其迭代：
+        # 它们会拿"后一个分型"反手取消前面的分型，依赖未来数据，属未来函数。
+        final_df = self.identify_segments(consecutive_filtered_df)
 
         # 保存最终统计
         final_fractals = final_df[final_df['is_fractal']]
@@ -1111,11 +646,6 @@ class ChanlunProcessor:
             'consecutive_filtered_top_count': consecutive_filtered_top_count,
             'consecutive_filtered_bottom_count': consecutive_filtered_bottom_count,
             'consecutive_removed_count': len(extreme_filtered_fractals) - len(consecutive_filtered_fractals),
-            'relationship_filtered_fractal_count': len(relationship_filtered_fractals),
-            'relationship_filtered_top_count': relationship_filtered_top_count,
-            'relationship_filtered_bottom_count': relationship_filtered_bottom_count,
-            'relationship_removed_count': len(consecutive_filtered_fractals) - len(relationship_filtered_fractals),
-            'close_removed_count': len(relationship_filtered_fractals) - len(final_fractals),
             'final_fractal_count': len(final_fractals),
             'final_top_count': final_top_count,
             'final_bottom_count': final_bottom_count,
@@ -1126,35 +656,38 @@ class ChanlunProcessor:
     
     def process_klines(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        处理K线数据的主入口
-        
+        处理K线数据的主入口（因果·无未来函数）
+
         Args:
-            df: 原始K线数据
-            
+            df: 原始K线数据（截至当前日期的全部K线，按时间升序）
+
         Returns:
             处理后的K线数据（包含分型和笔信息）
+
+        说明（去未来函数）：
+          - 不再调用 trim_data_by_extremes 按"全局极值"决定起点——那会偷看未来，
+            导致同一根历史K线的标签随数据截止日变化。
+          - 直接对传入的全部K线做合并与分型，起点只由数据本身决定。
+          - 笔已在 process_fractals 内的 identify_segments（单遍前向扫描）生成。
         """
         self.original_data = df.copy()
-        
-        # 第一步：根据极值修剪数据
-        trimmed_df = self.trim_data_by_extremes(df)
-        self.trimmed_data = trimmed_df
-        
-        # 第二步：合并K线生成缠论K线
-        chanlun_df = self.merge_klines(trimmed_df)
+
+        # 因果：起点只由传入数据决定，不按全局极值修剪（未来函数已移除）
+        self.trimmed_data = df.copy()
+        self.initial_direction = self._initial_direction_from_raw(df, 0) if len(df) >= 2 else None
+
+        # 合并K线生成缠论K线
+        chanlun_df = self.merge_klines(df)
         self.chanlun_data = chanlun_df
-        
-        # 第三步：识别顶分型和底分型
+
+        # 识别顶分型和底分型 + 成笔（因果流水线，见 process_fractals）
         fractals_df = self.process_fractals(chanlun_df)
         self.fractals_data = fractals_df
-        
-        # 第四步：识别笔
-        segments_df = self.identify_segments(fractals_df)
-        self.segments_data = segments_df
-        
-        return segments_df
+        self.segments_data = fractals_df
+
+        return fractals_df
     
-    def identify_segments(self, df: pd.DataFrame) -> pd.DataFrame:
+    def identify_segments(self, df: pd.DataFrame, min_gap: int = 4) -> pd.DataFrame:
         """
         识别笔（由分型组成的连续交叉序列）
         
@@ -1205,23 +738,26 @@ class ChanlunProcessor:
         result_df['segment_start_type'] = None
         result_df['segment_end_type'] = None
         
-        # 按照交叉原则筛选分型
+        # 按照交叉原则筛选分型（因果·单遍前向扫描，无未来函数）
+        # 与旧 filter_close_fractals 的区别：旧版会拿"后一个分型"反手取消前面的分型，
+        # 属未来函数；这里只按"两端间隔 >= min_gap"决定一笔是否成立，间隔不足的近邻
+        # 分型视为盘整毛刺直接跳过，不回看、不取消已定案的历史分型。
         filtered_fractals = []
+        prev_appended_idx = None
         if len(fractals) > 0:
             # 第一个分型
             filtered_fractals.append(fractals[0])
-            expected_type = None
-            
-            # 根据第一个分型类型确定期望的下一个类型
-            if fractals[0]['type'] == 'top':
-                expected_type = 'bottom'
-            else:
-                expected_type = 'top'
-            
+            prev_appended_idx = fractals[0]['index']
+            expected_type = 'bottom' if fractals[0]['type'] == 'top' else 'top'
+
             # 寻找符合交叉模式的分型
             for i in range(1, len(fractals)):
                 if fractals[i]['type'] == expected_type:
+                    # 成笔最小间隔（合并K线数）：间隔不足视为盘整毛刺，跳过
+                    if (fractals[i]['index'] - prev_appended_idx) < min_gap:
+                        continue
                     filtered_fractals.append(fractals[i])
+                    prev_appended_idx = fractals[i]['index']
                     # 交换期望类型
                     expected_type = 'top' if expected_type == 'bottom' else 'bottom'
                 else:

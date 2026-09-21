@@ -88,7 +88,8 @@ def label_stock(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame] | None:
     proc = ChanlunProcessor()
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        trimmed = proc.trim_data_by_extremes(df)
+        # 因果：不再按全局极值修剪起点（未来函数），直接对全部K线合并
+        trimmed = df
         if trimmed.empty or len(trimmed) < 60:
             return None
         merged = proc.merge_klines(trimmed)

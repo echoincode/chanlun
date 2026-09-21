@@ -77,10 +77,11 @@ def chain_v2(merged: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_pipeline(df_raw: pd.DataFrame):
-    """trim → merge，返回 (trimmed, merged)。失败返回 None。"""
+    """merge（不再按全局极值 trim，避免未来函数），返回 (df_raw, merged)。失败返回 None。"""
     proc = ChanlunProcessor()
     with contextlib.redirect_stdout(io.StringIO()):
-        trimmed = proc.trim_data_by_extremes(df_raw)
+        # 因果：不再按全局极值修剪起点（未来函数），直接对全部K线合并
+        trimmed = df_raw
         if trimmed.empty or len(trimmed) < 60:
             return None
         merged = proc.merge_klines(trimmed)
